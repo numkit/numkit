@@ -716,7 +716,6 @@ constexpr ExportRegEntry kExportFns[] = {
     {"im2frame",       &im2frame_reg},
     {"imtool",         &chartNoop_reg},
     {"implay",         &chartNoop_reg},
-    {"probplot",       &chartNoop_reg},
     {"newplot",        &chartNoop_reg},
     {"zoom",           &chartNoop_reg},
     {"pan",            &chartNoop_reg},

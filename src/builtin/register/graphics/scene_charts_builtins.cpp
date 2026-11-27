@@ -255,6 +255,8 @@ void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
 
     keel::usize idx = 0;
     const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    const NodeId preAx = (leadingAx != kInvalidNodeId) ? leadingAx : scene.currentAxesId();
+    const bool wasHoldOn = (preAx != kInvalidNodeId) && scene.isHoldOn(preAx);
     const NodeId axId = scene.prepareAxesForPlot(leadingAx, clearOnReplace);
 
     const ClassSchema &lineSchema = schemaFor(ClassId::Line);
@@ -350,6 +352,15 @@ void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
             } else if (!xVec && yMat && xArg.dims() == yArg.dims()) {
                 for (keel::usize c = 0; c < yArg.dims().cols(); ++c)
                     addOneLine(extractColAsRowVec(xArg, c, mr), extractColAsRowVec(yArg, c, mr));
+            } else if (xArg.numel() > 1 && yArg.numel() == 1) {
+                // plot(vec, scalar) -> N 1-point lines (matches reference behavior).
+                const Value ys = Value::scalar(yArg.elemAsDouble(0), mr);
+                for (keel::usize k = 0; k < xArg.numel(); ++k)
+                    addOneLine(Value::scalar(xArg.elemAsDouble(k), mr), ys);
+            } else if (yArg.numel() > 1 && xArg.numel() == 1) {
+                const Value xs = Value::scalar(xArg.elemAsDouble(0), mr);
+                for (keel::usize k = 0; k < yArg.numel(); ++k)
+                    addOneLine(xs, Value::scalar(yArg.elemAsDouble(k), mr));
             } else {
                 addOneLine(flattenToRowVec(xArg, mr), flattenToRowVec(yArg, mr));
             }
@@ -371,8 +382,10 @@ void plotCore(keel::ArrayRef<Value> args, keel::usize nargout,
     if (nvStart < args.size() && !created.empty())
         applyChartNVToAll(scene, created.as_ref(), args, nvStart, mr);
 
-    if (xScale) scene.setProperty(axId, "XScale", Value::fromString(xScale, mr), mr);
-    if (yScale) scene.setProperty(axId, "YScale", Value::fromString(yScale, mr), mr);
+    if (!wasHoldOn) {
+        if (xScale) scene.setProperty(axId, "XScale", Value::fromString(xScale, mr), mr);
+        if (yScale) scene.setProperty(axId, "YScale", Value::fromString(yScale, mr), mr);
+    }
     scene.recomputeAxesAutoLimits(axId, mr);
 
     outs[0] = (nargout >= 1) ? scene.makeHandleColumn(created.as_ref(), mr) : Value();
@@ -426,9 +439,9 @@ void plot3_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::Array<NodeId> created(mr);
     keel::usize nvStart = args.size();
     while (idx + 2 < args.size() && isPlottableCoord(args[idx]) && isPlottableCoord(args[idx + 1]) && isPlottableCoord(args[idx + 2])) {
-        const Value xv = flattenToRowVec(args[idx], mr);
-        const Value yv = flattenToRowVec(args[idx + 1], mr);
-        const Value zv = flattenToRowVec(args[idx + 2], mr);
+        const Value &xa = args[idx];
+        const Value &ya = args[idx + 1];
+        const Value &za = args[idx + 2];
         idx += 3;
         ParsedLineSpec ls;
         if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
@@ -438,14 +451,33 @@ void plot3_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 if (cand.valid) { ls = keel::move(cand); ++idx; }
             }
         }
-        const NodeId lid = scene.createChartNode(ClassId::Line, axId, true);
-        if (GraphicsNode *ln = scene.findNode(lid)) {
-            ln->props.put(keel::String::from("XData", mr), xv);
-            ln->props.put(keel::String::from("YData", mr), yv);
-            ln->props.put(keel::String::from("ZData", mr), zv);
+        auto addOne3D = [&](const Value &xv, const Value &yv, const Value &zv) {
+            const NodeId lid = scene.createChartNode(ClassId::Line, axId, true);
+            if (GraphicsNode *ln = scene.findNode(lid)) {
+                ln->props.put(keel::String::from("XData", mr), xv);
+                ln->props.put(keel::String::from("YData", mr), yv);
+                ln->props.put(keel::String::from("ZData", mr), zv);
+            }
+            applyLineSpecToNode(scene, lid, ls, mr);
+            created.push_back(lid);
+        };
+        const bool xMat = (xa.dims().rows() > 1 && xa.dims().cols() > 1);
+        const bool yMat = (ya.dims().rows() > 1 && ya.dims().cols() > 1);
+        const bool zMat = (za.dims().rows() > 1 && za.dims().cols() > 1);
+        if (xMat || yMat || zMat) {
+            const keel::usize nCols = xMat ? xa.dims().cols() : (yMat ? ya.dims().cols() : za.dims().cols());
+            const Value xFlat = xMat ? Value() : flattenToRowVec(xa, mr);
+            const Value yFlat = yMat ? Value() : flattenToRowVec(ya, mr);
+            const Value zFlat = zMat ? Value() : flattenToRowVec(za, mr);
+            for (keel::usize c = 0; c < nCols; ++c) {
+                const Value xv = xMat ? extractColAsRowVec(xa, c < xa.dims().cols() ? c : xa.dims().cols() - 1, mr) : xFlat;
+                const Value yv = yMat ? extractColAsRowVec(ya, c < ya.dims().cols() ? c : ya.dims().cols() - 1, mr) : yFlat;
+                const Value zv = zMat ? extractColAsRowVec(za, c < za.dims().cols() ? c : za.dims().cols() - 1, mr) : zFlat;
+                addOne3D(xv, yv, zv);
+            }
+        } else {
+            addOne3D(flattenToRowVec(xa, mr), flattenToRowVec(ya, mr), flattenToRowVec(za, mr));
         }
-        applyLineSpecToNode(scene, lid, ls, mr);
-        created.push_back(lid);
     }
     if (idx < args.size()) nvStart = idx;
     if (nvStart < args.size() && !created.empty())
@@ -646,7 +678,7 @@ void barh_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<V
 
 void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
                  keel::MutArrayRef<Value> outs, CallContext &ctx,
-                 bool isMesh, bool isPcolor, bool clearOnReplace)
+                 bool isMesh, bool isPcolor, bool clearOnReplace, bool withContour = false)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
     auto *mr = ctx.engine->allocator();
@@ -695,6 +727,50 @@ void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
     if (idx < args.size())
         applyChartNV(scene, sid, args, idx, mr);
 
+    NodeId cid = kInvalidNodeId;
+    if (withContour && !zd.isEmpty()) {
+        cid = scene.createChartNode(ClassId::Contour, axId, false);
+        if (GraphicsNode *cn = scene.findNode(cid)) {
+            if (!xd.isEmpty()) cn->props.put(keel::String::from("XData", mr), xd);
+            if (!yd.isEmpty()) cn->props.put(keel::String::from("YData", mr), yd);
+            cn->props.put(keel::String::from("ZData", mr), zd);
+            cn->props.put(keel::String::from("ZLocation", mr), Value::fromString("zmin", mr));
+            // Compute auto nice LevelList & LevelStep matching contourCore.
+            keel::f64 zmin = keel::Limits<keel::f64>::infinity();
+            keel::f64 zmax = -keel::Limits<keel::f64>::infinity();
+            for (keel::usize i = 0; i < zd.numel(); ++i) {
+                const keel::f64 v = zd.elemAsDouble(i);
+                if (keel::is_finite(v)) { zmin = keel::min(zmin, v); zmax = keel::max(zmax, v); }
+            }
+            if (keel::is_finite(zmin) && keel::is_finite(zmax) && zmax > zmin) {
+                const keel::f64 raw = (zmax - zmin) / 12.0;
+                const keel::f64 p10 = keel::pow(10.0, keel::floor(keel::log10(raw)));
+                const keel::f64 frac = raw / p10;
+                const keel::f64 mult = (frac <= 1.0 + 1e-12) ? 1.0
+                                     : (frac <= 2.0 + 1e-12) ? 2.0
+                                     : (frac <= 5.0 + 1e-12) ? 5.0
+                                                             : 10.0;
+                const keel::f64 step = mult * p10;
+                keel::f64 first = keel::ceil(zmin / step - 1e-12) * step;
+                if (zmin == 0.0 && keel::abs(first) <= 1e-12 * step)
+                    first = step;
+                const keel::f64 last = keel::floor(zmax / step + 1e-12) * step;
+                keel::Array<keel::f64> lv(mr);
+                for (keel::i32 k = 0; k < 256; ++k) {
+                    const keel::f64 val = first + keel::as<keel::f64>(k) * step;
+                    if (val > last + 1e-9 * step) break;
+                    lv.push_back(keel::abs(val) < 1e-12 * step ? 0.0 : val);
+                }
+                if (!lv.empty()) {
+                    Value ll = Value::matrix(1, lv.size(), ValueType::DOUBLE, mr);
+                    for (keel::usize k = 0; k < lv.size(); ++k) ll.doubleDataMut()[k] = lv[k];
+                    cn->props.put(keel::String::from("LevelList", mr), keel::move(ll));
+                    cn->props.put(keel::String::from("LevelStep", mr), Value::scalar(step, mr));
+                }
+            }
+        }
+    }
+
     if (!isPcolor && clearOnReplace) {
         Value vw = Value::matrix(1, 2, ValueType::DOUBLE, mr);
         vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
@@ -706,13 +782,26 @@ void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
         }
     }
     scene.recomputeAxesAutoLimits(axId, mr);
-    outs[0] = (nargout >= 1) ? scene.makeHandleValue(sid, mr) : Value();
+    if (nargout >= 1) {
+        if (cid != kInvalidNodeId) {
+            const NodeId pair[2] = {sid, cid};
+            outs[0] = scene.makeHandleColumn(keel::ArrayRef<NodeId>(pair, 2), mr);
+        } else {
+            outs[0] = scene.makeHandleValue(sid, mr);
+        }
+    } else {
+        outs[0] = Value();
+    }
 }
 
 void surf_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ surfaceCore(a, no, o, c, false, false, true); }
+{ surfaceCore(a, no, o, c, false, false, true, false); }
 void mesh_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
-{ surfaceCore(a, no, o, c, true, false, true); }
+{ surfaceCore(a, no, o, c, true, false, true, false); }
+void surfc_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
+{ surfaceCore(a, no, o, c, false, false, true, true); }
+void meshc_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
+{ surfaceCore(a, no, o, c, true, false, true, true); }
 void pcolor_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
 { surfaceCore(a, no, o, c, false, true, true); }
 void surface_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
@@ -2537,6 +2626,884 @@ void heatmap_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(hmid, mr) : Value();
 }
 
+// ── imshow / hist / waterfall / ribbon / comet / comet3 / ezplot3 / fplot3 / gscatter / boxplot / probplot / rectangle ──
+
+void imshow_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                      keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    if (args.empty()) {
+        outs[0] = Value();
+        return;
+    }
+
+    keel::usize idx = 0;
+    NodeId parentAx = kInvalidNodeId;
+    Value imgArg = args[idx++];
+    if (imgArg.isChar() || imgArg.isString()) {
+        // imshow(filename, ...) — load via imread if available
+        if (const ExternalFunc *ir = ctx.engine->findExternal("imread", ctx.env)) {
+            Value outV[1];
+            (*ir)(keel::ArrayRef<Value>(&imgArg, 1), 1, keel::MutArrayRef<Value>(outV, 1), ctx);
+            imgArg = keel::move(outV[0]);
+        }
+    }
+
+    bool autoScale = false;
+    Value climArg;
+    Value cmapArg;
+    if (idx < args.size()) {
+        if (args[idx].isEmpty() && args[idx].isNumeric()) {
+            autoScale = true;
+            ++idx;
+        } else if (args[idx].isNumeric() && args[idx].numel() == 2) {
+            climArg = args[idx++];
+        } else if (args[idx].isNumeric() && args[idx].dims().cols() == 3 && args[idx].dims().rows() > 1) {
+            cmapArg = args[idx++];
+        }
+    }
+    // Scan optional NV pairs for Parent / DisplayRange / Colormap
+    keel::Array<keel::usize> imgNVIdx(mr);
+    for (keel::usize i = idx; i + 1 < args.size(); i += 2) {
+        if (!args[i].isChar() && !args[i].isString())
+            break;
+        const keel::String nm = args[i].toString();
+        if (asciiEqualNoCase(nm, "Parent")) {
+            NodeId h = kInvalidNodeId;
+            if (extractSceneHandle(args[i + 1], h) && isAxesLike(scene, h))
+                parentAx = h;
+        } else if (asciiEqualNoCase(nm, "DisplayRange")) {
+            if (args[i + 1].isEmpty()) autoScale = true;
+            else if (args[i + 1].isNumeric() && args[i + 1].numel() == 2) climArg = args[i + 1];
+        } else if (asciiEqualNoCase(nm, "Colormap")) {
+            cmapArg = args[i + 1];
+        } else if (asciiEqualNoCase(nm, "InitialMagnification") || asciiEqualNoCase(nm, "Border")
+                   || asciiEqualNoCase(nm, "Interpolation") || asciiEqualNoCase(nm, "Reduce")) {
+            // Accepted display options (no-op in scene DOM).
+        } else if (schemaFor(ClassId::Image).findExactNoCase(nm) != nullptr) {
+            imgNVIdx.push_back(i);
+        }
+    }
+
+    const NodeId axId = scene.prepareAxesForPlot(parentAx, true);
+    const NodeId iid = scene.createChartNode(ClassId::Image, axId, false);
+    if (GraphicsNode *in = scene.findNode(iid)) {
+        if (!imgArg.isEmpty()) {
+            in->props.put(keel::String::from("CData", mr), imgArg);
+            Value defX = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            defX.doubleDataMut()[0] = 1.0;
+            defX.doubleDataMut()[1] = keel::as<keel::f64>(keel::max<keel::usize>(1, imgArg.dims().cols()));
+            Value defY = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            defY.doubleDataMut()[0] = 1.0;
+            defY.doubleDataMut()[1] = keel::as<keel::f64>(keel::max<keel::usize>(1, imgArg.dims().rows()));
+            in->props.put(keel::String::from("XData", mr), keel::move(defX));
+            in->props.put(keel::String::from("YData", mr), keel::move(defY));
+        }
+        in->props.put(keel::String::from("CDataMapping", mr),
+                      Value::fromString(cmapArg.isEmpty() ? "scaled" : "direct", mr));
+    }
+    for (keel::usize i : imgNVIdx)
+        scene.setProperty(iid, args[i].toString(), args[i + 1], mr);
+
+    scene.setProperty(axId, "YDir", Value::fromString("reverse", mr), mr);
+    scene.setProperty(axId, "Visible", Value::fromString("off", mr), mr);
+    if (!cmapArg.isEmpty())
+        scene.setProperty(axId, "Colormap", cmapArg, mr);
+
+    if (!climArg.isEmpty()) {
+        scene.setProperty(axId, "CLim", climArg, mr);
+    } else if (autoScale && !imgArg.isEmpty()) {
+        keel::f64 lo = keel::Limits<keel::f64>::infinity();
+        keel::f64 hi = -keel::Limits<keel::f64>::infinity();
+        for (keel::usize k = 0; k < imgArg.numel(); ++k) {
+            const keel::f64 v = imgArg.elemAsDouble(k);
+            if (keel::is_finite(v)) { lo = keel::min(lo, v); hi = keel::max(hi, v); }
+        }
+        if (keel::is_finite(lo) && keel::is_finite(hi)) {
+            if (hi <= lo) { lo -= 0.5; hi += 0.5; }
+            Value cl = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+            cl.doubleDataMut()[0] = lo; cl.doubleDataMut()[1] = hi;
+            scene.setProperty(axId, "CLim", keel::move(cl), mr);
+        }
+    } else if (cmapArg.isEmpty() && !imgArg.isEmpty() && imgArg.dims().ndim() <= 2) {
+        Value cl = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        if (imgArg.type() == ValueType::UINT8) { cl.doubleDataMut()[0] = 0.0; cl.doubleDataMut()[1] = 255.0; }
+        else if (imgArg.type() == ValueType::UINT16) { cl.doubleDataMut()[0] = 0.0; cl.doubleDataMut()[1] = 65535.0; }
+        else { cl.doubleDataMut()[0] = 0.0; cl.doubleDataMut()[1] = 1.0; }
+        scene.setProperty(axId, "CLim", keel::move(cl), mr);
+    }
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = (nargout >= 1) ? scene.makeHandleValue(iid, mr) : Value();
+}
+
+void hist_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                    keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    if (args.empty()) {
+        outs[0] = Value();
+        return;
+    }
+
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    if (idx >= args.size()) {
+        outs[0] = Value();
+        return;
+    }
+    const Value &data = args[idx++];
+    Value centers;
+    Value counts;
+    keel::f64 bw = 1.0;
+
+    if (idx < args.size() && args[idx].isNumeric() && args[idx].numel() > 1) {
+        const keel::usize bins = args[idx].numel();
+        centers = Value::matrix(1, bins, ValueType::DOUBLE, mr);
+        counts = Value::matrix(1, bins, ValueType::DOUBLE, mr);
+        for (keel::usize b = 0; b < bins; ++b)
+            centers.doubleDataMut()[b] = args[idx].elemAsDouble(b);
+        const keel::f64 *cd = centers.doubleData();
+        bw = (bins >= 2) ? keel::abs(cd[1] - cd[0]) : 1.0;
+        if (!(bw > 0.0) || !keel::is_finite(bw)) bw = 1.0;
+        for (keel::usize i = 0; i < data.numel(); ++i) {
+            const keel::f64 v = data.elemAsDouble(i);
+            if (keel::is_nan(v)) continue;
+            keel::usize b = 0;
+            while (b + 1 < bins && v > 0.5 * (cd[b] + cd[b + 1]))
+                ++b;
+            counts.doubleDataMut()[b] += 1.0;
+        }
+    } else {
+        const keel::i32 bins = (idx < args.size() && args[idx].isNumeric() && !args[idx].isEmpty())
+            ? keel::max<keel::i32>(1, keel::as<keel::i32>(args[idx].toScalar()))
+            : 10;
+        keel::f64 mn = keel::Limits<keel::f64>::infinity();
+        keel::f64 mx = -keel::Limits<keel::f64>::infinity();
+        for (keel::usize i = 0; i < data.numel(); ++i) {
+            const keel::f64 v = data.elemAsDouble(i);
+            if (keel::is_finite(v)) { mn = keel::min(mn, v); mx = keel::max(mx, v); }
+        }
+        if (!keel::is_finite(mn)) { mn = 0.0; mx = 1.0; }
+        bw = (mx - mn) / keel::as<keel::f64>(bins);
+        if (!(bw > 0.0) || !keel::is_finite(bw)) bw = 1.0;
+        centers = Value::matrix(1, keel::as<keel::usize>(bins), ValueType::DOUBLE, mr);
+        counts = Value::matrix(1, keel::as<keel::usize>(bins), ValueType::DOUBLE, mr);
+        for (keel::i32 b = 0; b < bins; ++b)
+            centers.doubleDataMut()[keel::as<keel::usize>(b)] = mn + bw * (keel::as<keel::f64>(b) + 0.5);
+        for (keel::usize i = 0; i < data.numel(); ++i) {
+            const keel::f64 v = data.elemAsDouble(i);
+            if (!keel::is_finite(v)) continue;
+            keel::i32 b = keel::as<keel::i32>(keel::floor((v - mn) / bw));
+            if (b >= bins) b = bins - 1;
+            if (b < 0) b = 0;
+            counts.doubleDataMut()[keel::as<keel::usize>(b)] += 1.0;
+        }
+    }
+
+    if (nargout >= 1) {
+        outs[0] = keel::move(counts);
+        if (nargout >= 2 && outs.size() >= 2)
+            outs[1] = keel::move(centers);
+        return;
+    }
+
+    // nargout == 0: render as Patch bar histogram (matches reference `hist` scene object type).
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    const NodeId pid = scene.createChartNode(ClassId::Patch, axId, true);
+    const keel::usize M = centers.numel();
+    if (M > 0) {
+        const keel::usize nVerts = 5 * M + 1;
+        Value verts = Value::matrix(nVerts, 2, ValueType::DOUBLE, mr);
+        Value faces = Value::matrix(M, 4, ValueType::DOUBLE, mr);
+        keel::f64 *vd = verts.doubleDataMut();
+        keel::f64 *fd = faces.doubleDataMut();
+        const keel::f64 *cd = centers.doubleData();
+        const keel::f64 *yd = counts.doubleData();
+        const keel::f64 halfW = 0.5 * bw;
+        for (keel::usize k = 0; k < M; ++k) {
+            const keel::f64 xL = cd[k] - halfW;
+            const keel::f64 xR = cd[k] + halfW;
+            const keel::f64 h = yd[k];
+            const keel::usize base = 5 * k;
+            vd[base + 0] = xL; vd[base + 0 + nVerts] = 0.0;
+            vd[base + 1] = xL; vd[base + 1 + nVerts] = 0.0;
+            vd[base + 2] = xL; vd[base + 2 + nVerts] = h;
+            vd[base + 3] = xR; vd[base + 3 + nVerts] = h;
+            vd[base + 4] = xR; vd[base + 4 + nVerts] = 0.0;
+            fd[k + 0 * M] = keel::as<keel::f64>(base + 2);
+            fd[k + 1 * M] = keel::as<keel::f64>(base + 3);
+            fd[k + 2 * M] = keel::as<keel::f64>(base + 4);
+            fd[k + 3 * M] = keel::as<keel::f64>(base + 5);
+        }
+        vd[5 * M] = cd[M - 1] + halfW;
+        vd[5 * M + nVerts] = 0.0;
+        if (GraphicsNode *pn = scene.findNode(pid)) {
+            pn->props.put(keel::String::from("Vertices", mr), keel::move(verts));
+            pn->props.put(keel::String::from("Faces", mr), keel::move(faces));
+        }
+        scene.syncPatchVerticesAndData(pid, "Vertices", mr);
+    }
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = Value();
+}
+
+void waterfall_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                         keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, true);
+
+    keel::Array<const Value *> nums(mr);
+    while (idx < args.size() && args[idx].isNumeric()) {
+        nums.push_back(&args[idx++]);
+        if (nums.size() == 4) break;
+    }
+    Value xd, yd, zd;
+    if (nums.size() == 1 || nums.size() == 2) {
+        zd = ensure2DDouble(*nums[0], mr);
+        xd = makeRange1N(zd.dims().cols(), mr);
+        yd = makeRange1N(zd.dims().rows(), mr);
+    } else if (nums.size() >= 3) {
+        xd = ensure2DDouble(*nums[0], mr);
+        yd = ensure2DDouble(*nums[1], mr);
+        zd = ensure2DDouble(*nums[2], mr);
+    }
+
+    const NodeId pid = scene.createChartNode(ClassId::Patch, axId, false);
+    if (!zd.isEmpty()) {
+        const keel::usize R = zd.dims().rows();
+        const keel::usize C = zd.dims().cols();
+        const bool xGrid = (xd.dims().rows() == R && xd.dims().cols() == C);
+        const bool yGrid = (yd.dims().rows() == R && yd.dims().cols() == C);
+        keel::f64 zBase = keel::Limits<keel::f64>::infinity();
+        for (keel::usize i = 0; i < zd.numel(); ++i) {
+            const keel::f64 v = zd.elemAsDouble(i);
+            if (keel::is_finite(v)) zBase = keel::min(zBase, v);
+        }
+        if (!keel::is_finite(zBase)) zBase = 0.0;
+
+        // Each row becomes a curtain polygon of (C + 5) vertices (matches reference waterfall patch).
+        const keel::usize ptsPerRow = C + 5;
+        const keel::usize totalV = R * ptsPerRow;
+        Value verts = Value::matrix(totalV, 3, ValueType::DOUBLE, mr);
+        Value faces = Value::matrix(R, ptsPerRow, ValueType::DOUBLE, mr);
+        keel::f64 *vd = verts.doubleDataMut();
+        keel::f64 *fd = faces.doubleDataMut();
+        for (keel::usize r = 0; r < R; ++r) {
+            auto xOf = [&](keel::usize c) { return xGrid ? xd.elemAsDouble(r + c * R) : (c < xd.numel() ? xd.elemAsDouble(c) : keel::as<keel::f64>(c + 1)); };
+            auto yOf = [&](keel::usize c) { return yGrid ? yd.elemAsDouble(r + c * R) : (r < yd.numel() ? yd.elemAsDouble(r) : keel::as<keel::f64>(r + 1)); };
+            auto setV = [&](keel::usize localIdx, keel::f64 x, keel::f64 y, keel::f64 z) {
+                const keel::usize gi = r * ptsPerRow + localIdx;
+                vd[gi]              = x;
+                vd[gi + totalV]     = y;
+                vd[gi + 2 * totalV] = z;
+                fd[r + localIdx * R] = keel::as<keel::f64>(gi + 1);
+            };
+            setV(0, xOf(0), yOf(0), zBase);
+            setV(1, xOf(0), yOf(0), zd.elemAsDouble(r));
+            for (keel::usize c = 0; c < C; ++c)
+                setV(c + 2, xOf(c), yOf(c), zd.elemAsDouble(r + c * R));
+            setV(C + 2, xOf(C - 1), yOf(C - 1), zd.elemAsDouble(r + (C - 1) * R));
+            setV(C + 3, xOf(C - 1), yOf(C - 1), zBase);
+            setV(C + 4, xOf(C - 1), yOf(C - 1), zBase);
+        }
+        if (GraphicsNode *pn = scene.findNode(pid)) {
+            pn->props.put(keel::String::from("Vertices", mr), keel::move(verts));
+            pn->props.put(keel::String::from("Faces", mr), keel::move(faces));
+        }
+        scene.syncPatchVerticesAndData(pid, "Vertices", mr);
+    }
+    if (idx < args.size())
+        applyChartNV(scene, pid, args, idx, mr);
+    Value vw = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+    vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
+    scene.setProperty(axId, "View", vw, mr);
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = (nargout >= 1) ? scene.makeHandleValue(pid, mr) : Value();
+}
+
+void ribbon_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                      keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, true);
+
+    keel::Array<const Value *> nums(mr);
+    while (idx < args.size() && args[idx].isNumeric()) {
+        nums.push_back(&args[idx++]);
+        if (nums.size() == 3) break;
+    }
+    Value xv, zv;
+    keel::f64 width = 0.75;
+    if (nums.size() == 1) {
+        zv = ensure2DDouble(*nums[0], mr);
+    } else if (nums.size() == 2) {
+        if (nums[1]->numel() == 1) {
+            zv = ensure2DDouble(*nums[0], mr);
+            width = nums[1]->toScalar();
+        } else {
+            xv = ensure2DDouble(*nums[0], mr);
+            zv = ensure2DDouble(*nums[1], mr);
+        }
+    } else if (nums.size() >= 3) {
+        xv = ensure2DDouble(*nums[0], mr);
+        zv = ensure2DDouble(*nums[1], mr);
+        width = nums[2]->toScalar();
+    }
+
+    keel::Array<NodeId> created(mr);
+    if (!zv.isEmpty()) {
+        const keel::usize R = zv.dims().rows();
+        const keel::usize C = zv.dims().cols();
+        const keel::f64 halfW = 0.5 * width;
+        for (keel::usize c = 0; c < C; ++c) {
+            const NodeId sid = scene.createChartNode(ClassId::Surface, axId, false);
+            Value rx = Value::matrix(R, 2, ValueType::DOUBLE, mr);
+            Value ry = Value::matrix(R, 2, ValueType::DOUBLE, mr);
+            Value rz = Value::matrix(R, 2, ValueType::DOUBLE, mr);
+            Value rc = Value::matrix(R, 2, ValueType::DOUBLE, mr);
+            const keel::f64 cx = keel::as<keel::f64>(c + 1);
+            for (keel::usize r = 0; r < R; ++r) {
+                const keel::f64 yVal = (!xv.isEmpty() && r < xv.numel()) ? xv.elemAsDouble(r) : keel::as<keel::f64>(r + 1);
+                const keel::f64 zVal = zv.elemAsDouble(r + c * R);
+                rx.doubleDataMut()[r]     = cx - halfW;
+                rx.doubleDataMut()[r + R] = cx + halfW;
+                ry.doubleDataMut()[r]     = yVal;
+                ry.doubleDataMut()[r + R] = yVal;
+                rz.doubleDataMut()[r]     = zVal;
+                rz.doubleDataMut()[r + R] = zVal;
+                rc.doubleDataMut()[r]     = cx;
+                rc.doubleDataMut()[r + R] = cx;
+            }
+            if (GraphicsNode *sn = scene.findNode(sid)) {
+                sn->props.put(keel::String::from("XData", mr), keel::move(rx));
+                sn->props.put(keel::String::from("YData", mr), keel::move(ry));
+                sn->props.put(keel::String::from("ZData", mr), keel::move(rz));
+                sn->props.put(keel::String::from("CData", mr), keel::move(rc));
+            }
+            created.push_back(sid);
+        }
+    }
+    if (idx < args.size() && !created.empty())
+        applyChartNVToAll(scene, created.as_ref(), args, idx, mr);
+    Value vw = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+    vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
+    scene.setProperty(axId, "View", vw, mr);
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = (nargout >= 1) ? scene.makeHandleColumn(created.as_ref(), mr) : Value();
+}
+
+void cometCore(keel::ArrayRef<Value> args, keel::usize,
+               keel::MutArrayRef<Value> outs, CallContext &ctx, bool is3D)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, is3D);
+
+    Value xv, yv, zv;
+    if (!is3D) {
+        if (idx + 1 < args.size() && args[idx].isNumeric() && args[idx + 1].isNumeric()) {
+            xv = flattenToRowVec(args[idx++], mr);
+            yv = flattenToRowVec(args[idx++], mr);
+        } else if (idx < args.size() && args[idx].isNumeric()) {
+            yv = flattenToRowVec(args[idx++], mr);
+            xv = makeRange1N(yv.numel(), mr);
+        }
+    } else if (idx + 2 < args.size() && args[idx].isNumeric() && args[idx + 1].isNumeric() && args[idx + 2].isNumeric()) {
+        xv = flattenToRowVec(args[idx++], mr);
+        yv = flattenToRowVec(args[idx++], mr);
+        zv = flattenToRowVec(args[idx++], mr);
+    }
+
+    // Reference comet/comet3 creates 3 children: 1 head Line (1 point at end) + 2 AnimatedLine (body, tail).
+    const NodeId headId = scene.createChartNode(ClassId::Line, axId, true);
+    const NodeId bodyId = scene.createChartNode(ClassId::AnimatedLine, axId, true);
+    const NodeId tailId = scene.createChartNode(ClassId::AnimatedLine, axId, true);
+    if (!xv.isEmpty() && !yv.isEmpty()) {
+        const keel::usize n = keel::min(xv.numel(), yv.numel());
+        if (GraphicsNode *hn = scene.findNode(headId); hn && n > 0) {
+            hn->props.put(keel::String::from("XData", mr), Value::scalar(xv.elemAsDouble(n - 1), mr));
+            hn->props.put(keel::String::from("YData", mr), Value::scalar(yv.elemAsDouble(n - 1), mr));
+            if (is3D && !zv.isEmpty())
+                hn->props.put(keel::String::from("ZData", mr), Value::scalar(zv.elemAsDouble(keel::min(n, zv.numel()) - 1), mr));
+            hn->props.put(keel::String::from("Marker", mr), Value::fromString("o", mr));
+        }
+        const Value *zPtr = (is3D && !zv.isEmpty()) ? &zv : nullptr;
+        scene.animatedLineAddPoints(bodyId, xv, yv, zPtr, mr);
+        scene.animatedLineAddPoints(tailId, xv, yv, zPtr, mr);
+    }
+    if (is3D) {
+        Value vw = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
+        scene.setProperty(axId, "View", vw, mr);
+    }
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = Value();
+}
+
+void comet_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
+{ cometCore(a, no, o, c, false); }
+void comet3_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
+{ cometCore(a, no, o, c, true); }
+
+Value toParamHandle(const Value &v, CallContext &ctx, keel::Allocator *mr)
+{
+    if (v.isFuncHandle())
+        return v;
+    if (v.isObject() && (v.objectClassNameRef() == "sym" || v.objectClassNameRef() == "symfun")) {
+        const ExternalFunc *mf = ctx.engine->findExternal("matlabFunction", ctx.env);
+        if (!mf) mf = ctx.engine->findExternal("cas.matlabFunction", ctx.env);
+        if (mf) {
+            Value outV[1];
+            (*mf)(keel::ArrayRef<Value>(&v, 1), 1, keel::MutArrayRef<Value>(outV, 1), ctx);
+            return outV[0];
+        }
+    }
+    if (v.isChar() || v.isString()) {
+        const keel::String expr = v.toString();
+        if (const ExternalFunc *s2f = ctx.engine->findExternal("str2func", ctx.env)) {
+            keel::String body(mr);
+            if (expr.find('@') == keel::kInvalidIndex) {
+                body.append("@(t) ");
+                body.append(expr);
+            } else {
+                body.append(expr);
+            }
+            Value sArg = Value::fromString(body, mr);
+            Value outV[1];
+            (*s2f)(keel::ArrayRef<Value>(&sArg, 1), 1, keel::MutArrayRef<Value>(outV, 1), ctx);
+            return outV[0];
+        }
+    }
+    return Value();
+}
+
+void fplot3Core(keel::ArrayRef<Value> args, keel::usize nargout,
+                keel::MutArrayRef<Value> outs, CallContext &ctx, bool isEz)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true, true);
+    if (idx + 2 >= args.size()) {
+        outs[0] = Value();
+        return;
+    }
+    const Value fx = toParamHandle(args[idx++], ctx, mr);
+    const Value fy = toParamHandle(args[idx++], ctx, mr);
+    const Value fz = toParamHandle(args[idx++], ctx, mr);
+    if (!fx.isFuncHandle() || !fy.isFuncHandle() || !fz.isFuncHandle()) {
+        outs[0] = Value();
+        return;
+    }
+    keel::f64 lo = isEz ? 0.0 : -5.0;
+    keel::f64 hi = isEz ? (2.0 * keel::kPi) : 5.0;
+    if (idx < args.size() && args[idx].isNumeric() && args[idx].numel() >= 2) {
+        lo = args[idx].elemAsDouble(0);
+        hi = args[idx].elemAsDouble(1);
+        ++idx;
+    }
+    // Optional 'animate' flag on ezplot3
+    bool animate = false;
+    if (isEz && idx < args.size() && (args[idx].isChar() || args[idx].isString())
+        && asciiEqualNoCase(args[idx].toString(), "animate")) {
+        animate = true;
+        ++idx;
+    }
+
+    const keel::usize kN = isEz ? 300 : 200;
+    Value xv = Value::matrix(1, kN, ValueType::DOUBLE, mr);
+    Value yv = Value::matrix(1, kN, ValueType::DOUBLE, mr);
+    Value zv = Value::matrix(1, kN, ValueType::DOUBLE, mr);
+    for (keel::usize i = 0; i < kN; ++i) {
+        const keel::f64 t = lo + (hi - lo) * keel::as<keel::f64>(i) / keel::as<keel::f64>(kN - 1);
+        const Value tArr[1] = {Value::scalar(t, mr)};
+        const Value rx = ctx.engine->callFunctionHandle(fx, keel::ArrayRef<Value>(tArr, 1));
+        const Value ry = ctx.engine->callFunctionHandle(fy, keel::ArrayRef<Value>(tArr, 1));
+        const Value rz = ctx.engine->callFunctionHandle(fz, keel::ArrayRef<Value>(tArr, 1));
+        xv.doubleDataMut()[i] = rx.isNumeric() && !rx.isEmpty() ? rx.elemAsDouble(0) : keel::kNaN;
+        yv.doubleDataMut()[i] = ry.isNumeric() && !ry.isEmpty() ? ry.elemAsDouble(0) : keel::kNaN;
+        zv.doubleDataMut()[i] = rz.isNumeric() && !rz.isEmpty() ? rz.elemAsDouble(0) : keel::kNaN;
+    }
+
+    const keel::f64 xLast = xv.doubleData()[kN - 1];
+    const keel::f64 yLast = yv.doubleData()[kN - 1];
+    const keel::f64 zLast = zv.doubleData()[kN - 1];
+
+    const ClassId lineCid = isEz ? ClassId::Line : ClassId::ParameterizedFunctionLine;
+    const NodeId lid = scene.createChartNode(lineCid, axId, true);
+    if (GraphicsNode *ln = scene.findNode(lid)) {
+        ln->props.put(keel::String::from("XData", mr), keel::move(xv));
+        ln->props.put(keel::String::from("YData", mr), keel::move(yv));
+        ln->props.put(keel::String::from("ZData", mr), keel::move(zv));
+    }
+    if (animate) {
+        // ezplot3(..., 'animate') appends a 1-point marker head line at the final point.
+        const NodeId headId = scene.createChartNode(ClassId::Line, axId, false);
+        if (GraphicsNode *hn = scene.findNode(headId)) {
+            hn->props.put(keel::String::from("XData", mr), Value::scalar(xLast, mr));
+            hn->props.put(keel::String::from("YData", mr), Value::scalar(yLast, mr));
+            hn->props.put(keel::String::from("ZData", mr), Value::scalar(zLast, mr));
+            hn->props.put(keel::String::from("Marker", mr), Value::fromString("o", mr));
+            hn->props.put(keel::String::from("LineStyle", mr), Value::fromString("none", mr));
+        }
+    }
+    if (idx < args.size()) {
+        const ClassSchema &lSchema = schemaFor(ClassId::Line);
+        if ((args[idx].isChar() || args[idx].isString())
+            && !(((args.size() - idx) % 2 == 0) && lSchema.findExactNoCase(args[idx].toString()) != nullptr)) {
+            const ParsedLineSpec ls = parseLineSpec(args[idx].toString(), mr);
+            if (ls.valid) { applyLineSpecToNode(scene, lid, ls, mr); ++idx; }
+        }
+        if (idx < args.size())
+            applyChartNV(scene, lid, args, idx, mr);
+    }
+    Value vw = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+    vw.doubleDataMut()[0] = -37.5; vw.doubleDataMut()[1] = 30.0;
+    scene.setProperty(axId, "View", vw, mr);
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = (nargout >= 1) ? scene.makeHandleValue(lid, mr) : Value();
+}
+
+void fplot3_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
+{ fplot3Core(a, no, o, c, false); }
+void ezplot3_scene_reg(keel::ArrayRef<Value> a, keel::usize no, keel::MutArrayRef<Value> o, CallContext &c)
+{ fplot3Core(a, no, o, c, true); }
+
+void gscatter_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                        keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    if (args.size() < 2) {
+        outs[0] = Value();
+        return;
+    }
+    const NodeId axId = scene.prepareAxesForPlot(kInvalidNodeId, true);
+    const Value &X = args[0];
+    const Value &Y = args[1];
+    const keel::usize N = keel::min(X.numel(), Y.numel());
+    if (N == 0) {
+        outs[0] = Value();
+        return;
+    }
+
+    struct GroupKey {
+        keel::String label;
+        keel::f64 numVal = 0.0;
+        bool isNumeric = false;
+    };
+    keel::Array<GroupKey> groupKeys(mr);
+    keel::Array<keel::usize> groupIdx(N, 0, mr);
+    if (args.size() >= 3 && !args[2].isEmpty()) {
+        const Value &G = args[2];
+        const bool gNum = G.isNumeric() || G.isLogical();
+        for (keel::usize i = 0; i < N; ++i) {
+            const keel::usize giPos = (i < G.numel()) ? i : (G.numel() - 1);
+            keel::String key(mr);
+            keel::f64 nv = 0.0;
+            if (G.isCell()) key = G.cellAt(giPos).toString();
+            else if (G.isString()) key = G.stringElem(giPos, mr);
+            else { nv = G.elemAsDouble(giPos); key = keel::format("{:.6g}", nv); }
+            keel::usize found = groupKeys.size();
+            for (keel::usize j = 0; j < groupKeys.size(); ++j) {
+                if (gNum ? (groupKeys[j].numVal == nv) : (groupKeys[j].label == key)) {
+                    found = j;
+                    break;
+                }
+            }
+            if (found == groupKeys.size())
+                groupKeys.push_back(GroupKey{keel::move(key), nv, gNum});
+            groupIdx[i] = found;
+        }
+    } else {
+        groupKeys.push_back(GroupKey{keel::String::from("1", mr), 1.0, true});
+    }
+
+    // Reference gscatter orders unique groups ascending (numeric or lexicographic).
+    keel::Array<keel::usize> order(groupKeys.size(), mr);
+    for (keel::usize i = 0; i < groupKeys.size(); ++i) order[i] = i;
+    keel::sort(order.begin(), order.end(), [&](keel::usize a, keel::usize b) {
+        if (groupKeys[a].isNumeric && groupKeys[b].isNumeric)
+            return groupKeys[a].numVal < groupKeys[b].numVal;
+        return groupKeys[a].label < groupKeys[b].label;
+    });
+
+    keel::Array<keel::String> groupNames(mr);
+    keel::Array<NodeId> created(mr);
+    for (keel::usize oi = 0; oi < order.size(); ++oi) {
+        const keel::usize gi = order[oi];
+        keel::Array<keel::f64> gx(mr), gy(mr);
+        for (keel::usize i = 0; i < N; ++i) {
+            if (groupIdx[i] == gi) {
+                gx.push_back(X.elemAsDouble(i));
+                gy.push_back(Y.elemAsDouble(i));
+            }
+        }
+        const NodeId lid = scene.createChartNode(ClassId::Line, axId, true);
+        Value xv = Value::matrix(1, gx.size(), ValueType::DOUBLE, mr);
+        Value yv = Value::matrix(1, gy.size(), ValueType::DOUBLE, mr);
+        for (keel::usize k = 0; k < gx.size(); ++k) {
+            xv.doubleDataMut()[k] = gx[k];
+            yv.doubleDataMut()[k] = gy[k];
+        }
+        if (GraphicsNode *ln = scene.findNode(lid)) {
+            ln->props.put(keel::String::from("XData", mr), keel::move(xv));
+            ln->props.put(keel::String::from("YData", mr), keel::move(yv));
+            ln->props.put(keel::String::from("LineStyle", mr), Value::fromString("none", mr));
+            ln->props.put(keel::String::from("Marker", mr), Value::fromString(".", mr));
+            ln->props.put(keel::String::from("DisplayName", mr), Value::fromString(groupKeys[gi].label, mr));
+        }
+        groupNames.push_back(groupKeys[gi].label.clone(mr));
+        created.push_back(lid);
+    }
+    scene.createOrUpdateLegend(axId, groupNames.as_ref());
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = (nargout >= 1) ? scene.makeHandleColumn(created.as_ref(), mr) : Value();
+}
+
+void boxplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                       keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    if (idx >= args.size()) {
+        outs[0] = Value();
+        return;
+    }
+    const Value &X = args[idx++];
+    keel::Array<keel::String> labels(mr);
+    keel::Array<keel::Array<keel::f64>> groups(mr);
+
+    if (idx < args.size() && (args[idx].isCell() || args[idx].isString() || args[idx].isNumeric())
+        && args[idx].numel() == X.numel() && X.numel() > 1) {
+        const Value &G = args[idx++];
+        for (keel::usize i = 0; i < X.numel(); ++i) {
+            keel::String key(mr);
+            if (G.isCell()) key = G.cellAt(i).toString();
+            else if (G.isString()) key = G.stringElem(i, mr);
+            else key = keel::format("{:.6g}", G.elemAsDouble(i));
+            keel::usize gi = labels.size();
+            for (keel::usize j = 0; j < labels.size(); ++j) {
+                if (labels[j] == key) { gi = j; break; }
+            }
+            if (gi == labels.size()) {
+                labels.push_back(keel::move(key));
+                groups.push_back(keel::Array<keel::f64>(mr));
+            }
+            const keel::f64 v = X.elemAsDouble(i);
+            if (keel::is_finite(v))
+                groups[gi].push_back(v);
+        }
+    } else if (X.dims().rows() > 1 && X.dims().cols() > 1) {
+        for (keel::usize c = 0; c < X.dims().cols(); ++c) {
+            labels.push_back(keel::format("{}", c + 1));
+            keel::Array<keel::f64> col(mr);
+            for (keel::usize r = 0; r < X.dims().rows(); ++r) {
+                const keel::f64 v = X.elemAsDouble(r + c * X.dims().rows());
+                if (keel::is_finite(v)) col.push_back(v);
+            }
+            groups.push_back(keel::move(col));
+        }
+    } else {
+        labels.push_back(keel::String::from("1", mr));
+        keel::Array<keel::f64> col(mr);
+        for (keel::usize i = 0; i < X.numel(); ++i) {
+            const keel::f64 v = X.elemAsDouble(i);
+            if (keel::is_finite(v)) col.push_back(v);
+        }
+        groups.push_back(keel::move(col));
+    }
+
+    // Reference boxplot groups all box/whisker/median primitives under a single hggroup child of Axes.
+    const NodeId grpId = scene.createChartNode(ClassId::Group, axId, false);
+    if (GraphicsNode *gn = scene.findNode(grpId))
+        gn->props.put(keel::String::from("Tag", mr), Value::fromString("boxplot", mr));
+    keel::Array<NodeId> created(mr);
+    for (keel::usize g = 0; g < groups.size(); ++g) {
+        keel::Array<keel::f64> &vals = groups[g];
+        if (vals.empty()) continue;
+        keel::sort(vals);
+        auto pct = [&](keel::f64 p) -> keel::f64 {
+            const keel::f64 pos = p * keel::as<keel::f64>(vals.size() - 1);
+            const keel::usize lo = keel::as<keel::usize>(keel::floor(pos));
+            const keel::usize hi = keel::min(lo + 1, vals.size() - 1);
+            return vals[lo] + (pos - keel::as<keel::f64>(lo)) * (vals[hi] - vals[lo]);
+        };
+        const keel::f64 q1 = pct(0.25), med = pct(0.5), q3 = pct(0.75);
+        const keel::f64 cx = keel::as<keel::f64>(g + 1);
+        const keel::f64 hw = 0.25;
+        const NodeId boxId = scene.createChartNode(ClassId::Line, grpId, false);
+        Value bx = Value::matrix(1, 5, ValueType::DOUBLE, mr);
+        Value by = Value::matrix(1, 5, ValueType::DOUBLE, mr);
+        bx.doubleDataMut()[0] = cx - hw; by.doubleDataMut()[0] = q1;
+        bx.doubleDataMut()[1] = cx + hw; by.doubleDataMut()[1] = q1;
+        bx.doubleDataMut()[2] = cx + hw; by.doubleDataMut()[2] = q3;
+        bx.doubleDataMut()[3] = cx - hw; by.doubleDataMut()[3] = q3;
+        bx.doubleDataMut()[4] = cx - hw; by.doubleDataMut()[4] = q1;
+        if (GraphicsNode *bn = scene.findNode(boxId)) {
+            bn->props.put(keel::String::from("XData", mr), keel::move(bx));
+            bn->props.put(keel::String::from("YData", mr), keel::move(by));
+            bn->props.put(keel::String::from("Tag", mr), Value::fromString("Box", mr));
+        }
+        const NodeId medId = scene.createChartNode(ClassId::Line, grpId, false);
+        Value mx = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        Value my = Value::matrix(1, 2, ValueType::DOUBLE, mr);
+        mx.doubleDataMut()[0] = cx - hw; my.doubleDataMut()[0] = med;
+        mx.doubleDataMut()[1] = cx + hw; my.doubleDataMut()[1] = med;
+        if (GraphicsNode *mn = scene.findNode(medId)) {
+            mn->props.put(keel::String::from("XData", mr), keel::move(mx));
+            mn->props.put(keel::String::from("YData", mr), keel::move(my));
+            mn->props.put(keel::String::from("Tag", mr), Value::fromString("Median", mr));
+        }
+        created.push_back(boxId);
+        created.push_back(medId);
+    }
+    if (!labels.empty()) {
+        Value xtk = Value::matrix(1, labels.size(), ValueType::DOUBLE, mr);
+        Value xtl = Value::cell(1, labels.size(), mr);
+        for (keel::usize i = 0; i < labels.size(); ++i) {
+            xtk.doubleDataMut()[i] = keel::as<keel::f64>(i + 1);
+            xtl.cellAt(i) = Value::fromString(labels[i], mr);
+        }
+        scene.setProperty(axId, "XTick", keel::move(xtk), mr);
+        scene.setProperty(axId, "XTickLabel", keel::move(xtl), mr);
+    }
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = (nargout >= 1) ? scene.makeHandleColumn(created.as_ref(), mr) : Value();
+}
+
+void probplot_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                        keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    if (idx < args.size() && (args[idx].isChar() || args[idx].isString()))
+        ++idx; // distribution name (default 'normal')
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, true);
+    keel::Array<keel::f64> ys(mr);
+    if (idx < args.size() && args[idx].isNumeric()) {
+        for (keel::usize i = 0; i < args[idx].numel(); ++i) {
+            const keel::f64 v = args[idx].elemAsDouble(i);
+            if (keel::is_finite(v)) ys.push_back(v);
+        }
+    }
+    keel::sort(ys);
+    const keel::usize n = ys.size();
+    // Acklam rational approximation of standard normal inverse CDF (relative error < 1.15e-9).
+    auto normInv = [](keel::f64 p) -> keel::f64 {
+        p = keel::clamp(p, 1e-15, 1.0 - 1e-15);
+        constexpr keel::f64 a1 = -3.969683028665376e+01, a2 =  2.209460984245205e+02,
+                            a3 = -2.759285104469687e+02, a4 =  1.383577518672690e+02,
+                            a5 = -3.066479806614716e+01, a6 =  2.506628277459239e+00;
+        constexpr keel::f64 b1 = -5.447609879822406e+01, b2 =  1.615858368580409e+02,
+                            b3 = -1.556989798598866e+02, b4 =  6.680131188771972e+01,
+                            b5 = -1.328068155288572e+01;
+        constexpr keel::f64 c1 = -7.784894002430293e-03, c2 = -3.223964580411365e-01,
+                            c3 = -2.400758277161838e+00, c4 = -2.549732539343734e+00,
+                            c5 =  4.374664141464968e+00, c6 =  2.938163982698783e+00;
+        constexpr keel::f64 d1 =  7.784695709041462e-03, d2 =  3.224671290700398e-01,
+                            d3 =  2.445134137142996e+00, d4 =  3.754408661907416e+00;
+        constexpr keel::f64 pLow = 0.02425, pHigh = 1.0 - pLow;
+        if (p < pLow) {
+            const keel::f64 q = keel::sqrt(-2.0 * keel::log(p));
+            return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6)
+                 / ((((d1 * q + d2) * q + d3) * q + d4) * q + 1.0);
+        }
+        if (p <= pHigh) {
+            const keel::f64 q = p - 0.5;
+            const keel::f64 r = q * q;
+            return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q
+                 / (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1.0);
+        }
+        const keel::f64 q = keel::sqrt(-2.0 * keel::log(1.0 - p));
+        return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6)
+              / ((((d1 * q + d2) * q + d3) * q + d4) * q + 1.0);
+    };
+
+    // Reference probplot emits FunctionLine (reference fit) first, then data Line (N points) second.
+    const NodeId refLine = scene.createChartNode(ClassId::FunctionLine, axId, false);
+    const NodeId dataLine = scene.createChartNode(ClassId::Line, axId, true);
+    if (n > 0) {
+        Value xv = Value::matrix(1, n, ValueType::DOUBLE, mr);
+        Value yv = Value::matrix(1, n, ValueType::DOUBLE, mr);
+        for (keel::usize i = 0; i < n; ++i) {
+            const keel::f64 p = (keel::as<keel::f64>(i) + 0.5) / keel::as<keel::f64>(n);
+            xv.doubleDataMut()[i] = ys[i];
+            yv.doubleDataMut()[i] = normInv(p);
+        }
+        if (GraphicsNode *dn = scene.findNode(dataLine)) {
+            dn->props.put(keel::String::from("XData", mr), keel::move(xv));
+            dn->props.put(keel::String::from("YData", mr), keel::move(yv));
+            dn->props.put(keel::String::from("LineStyle", mr), Value::fromString("none", mr));
+            dn->props.put(keel::String::from("Marker", mr), Value::fromString("+", mr));
+        }
+        auto qAt = [&](keel::f64 p) -> keel::f64 {
+            const keel::f64 pos = p * keel::as<keel::f64>(n) - 0.5;
+            if (pos <= 0.0) return ys[0];
+            if (pos >= keel::as<keel::f64>(n - 1)) return ys[n - 1];
+            const keel::usize lo = keel::as<keel::usize>(keel::floor(pos));
+            const keel::usize hi = keel::min(lo + 1, n - 1);
+            return ys[lo] + (pos - keel::as<keel::f64>(lo)) * (ys[hi] - ys[lo]);
+        };
+        const keel::f64 q25 = qAt(0.25), q75 = qAt(0.75);
+        const keel::f64 z25 = normInv(0.25), z75 = normInv(0.75);
+        const keel::f64 slope = (keel::abs(q75 - q25) > 1e-15) ? (z75 - z25) / (q75 - q25) : 0.0;
+        const keel::f64 intercept = z25 - slope * q25;
+        constexpr keel::usize kRefN = 45;
+        Value rx = Value::matrix(1, kRefN, ValueType::DOUBLE, mr);
+        Value ry = Value::matrix(1, kRefN, ValueType::DOUBLE, mr);
+        for (keel::usize k = 0; k < kRefN; ++k) {
+            const keel::f64 xk = ys[0] + (ys[n - 1] - ys[0]) * keel::as<keel::f64>(k) / keel::as<keel::f64>(kRefN - 1);
+            rx.doubleDataMut()[k] = xk;
+            ry.doubleDataMut()[k] = intercept + slope * xk;
+        }
+        if (GraphicsNode *rn = scene.findNode(refLine)) {
+            rn->props.put(keel::String::from("XData", mr), keel::move(rx));
+            rn->props.put(keel::String::from("YData", mr), keel::move(ry));
+            rn->props.put(keel::String::from("LineStyle", mr), Value::fromString("--", mr));
+        }
+    }
+    scene.recomputeAxesAutoLimits(axId, mr);
+    if (nargout >= 1) {
+        const NodeId pair[2] = {dataLine, refLine};
+        outs[0] = scene.makeHandleColumn(keel::ArrayRef<NodeId>(pair, 2), mr);
+    } else {
+        outs[0] = Value();
+    }
+}
+
+void rectangle_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                         keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    keel::usize idx = 0;
+    const NodeId leadingAx = resolveLeadingAxesOpt(scene, args, idx);
+    const NodeId axId = scene.prepareAxesForPlot(leadingAx, false);
+    const NodeId rid = scene.createChartNode(ClassId::Rectangle, axId, false);
+    if (idx < args.size())
+        applyChartNV(scene, rid, args, idx, mr);
+    scene.recomputeAxesAutoLimits(axId, mr);
+    outs[0] = (nargout >= 1) ? scene.makeHandleValue(rid, mr) : Value();
+}
+
 } // anonymous namespace
 
 void registerSceneChartsBuiltins(Engine &engine)
@@ -2561,6 +3528,11 @@ void registerSceneChartsBuiltins(Engine &engine)
     regBoth("line",    "area",         &area_scene_reg);
     regBoth("line",    "errorbar",     &errorbar_scene_reg);
     regBoth("line",    "fplot",        &fplot_scene_reg);
+    regBoth("line",    "fplot3",       &fplot3_scene_reg);
+    regBoth("line",    "ezplot3",      &ezplot3_scene_reg);
+    regBoth("line",    "comet",        &comet_scene_reg);
+    regBoth("line",    "comet3",       &comet3_scene_reg);
+    regBoth("line",    "ribbon",       &ribbon_scene_reg);
     regBoth("line",    "animatedline", &animatedline_scene_reg);
     regBoth("line",    "addpoints",    &addpoints_scene_reg);
     regBoth("line",    "getpoints",    &getpoints_scene_reg);
@@ -2568,21 +3540,27 @@ void registerSceneChartsBuiltins(Engine &engine)
 
     regBoth("bar",     "scatter",      &scatter_scene_reg);
     regBoth("bar",     "scatter3",     &scatter3_scene_reg);
+    regBoth("bar",     "gscatter",     &gscatter_scene_reg);
     regBoth("bar",     "bar",          &bar_scene_reg);
     regBoth("bar",     "barh",         &barh_scene_reg);
+    regBoth("bar",     "hist",         &hist_scene_reg);
     regBoth("bar",     "histogram",    &histogram_scene_reg);
     regBoth("bar",     "histogram2",   &histogram2_scene_reg);
     regBoth("bar",     "boxchart",     &boxchart_scene_reg);
+    regBoth("bar",     "boxplot",      &boxplot_scene_reg);
+    regBoth("bar",     "probplot",     &probplot_scene_reg);
     regBoth("bar",     "pie",          &pie_scene_reg);
     regBoth("bar",     "pie3",         &pie_scene_reg);
     regBoth("bar",     "patch",        &patch_scene_reg);
     regBoth("bar",     "fill",         &fill_scene_reg);
     regBoth("bar",     "fill3",        &fill3_scene_reg);
+    regBoth("bar",     "rectangle",    &rectangle_scene_reg);
 
     regBoth("surface", "surf",         &surf_scene_reg);
     regBoth("surface", "mesh",         &mesh_scene_reg);
-    regBoth("surface", "surfc",        &surf_scene_reg);
-    regBoth("surface", "meshc",        &mesh_scene_reg);
+    regBoth("surface", "surfc",        &surfc_scene_reg);
+    regBoth("surface", "meshc",        &meshc_scene_reg);
+    regBoth("surface", "waterfall",    &waterfall_scene_reg);
     regBoth("surface", "pcolor",       &pcolor_scene_reg);
     regBoth("surface", "surface",      &surface_scene_reg);
     regBoth("surface", "slice",        &slice_scene_reg);
@@ -2597,6 +3575,7 @@ void registerSceneChartsBuiltins(Engine &engine)
 
     regBoth("image",   "image",        &image_scene_reg);
     regBoth("image",   "imagesc",      &imagesc_scene_reg);
+    regBoth("image",   "imshow",       &imshow_scene_reg);
     regBoth("image",   "heatmap",      &heatmap_scene_reg);
 
     regBoth("polar",   "polarplot",    &polarplot_scene_reg);

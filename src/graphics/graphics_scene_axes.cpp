@@ -485,6 +485,31 @@ NodeId GraphicsScene::createOrActivateSubplot(NodeId figId, keel::i32 m, keel::i
         }
     }
 
+    // Delete any existing Axes/PolarAxes in this figure whose Position strictly overlaps
+    // the new subplot rectangle (matches reference subplot replacement behavior).
+    if (const GraphicsNode *fn = findNode(fid)) {
+        keel::Array<NodeId> toDelete(mr_);
+        for (NodeId cid : fn->children) {
+            const GraphicsNode *c = findNode(cid);
+            if (!c || (c->classId != ClassId::Axes && c->classId != ClassId::PolarAxes))
+                continue;
+            const Value ep = getProperty(cid, "Position", mr_);
+            if (ep.isNumeric() && ep.numel() == 4) {
+                const keel::f64 el = ep.elemAsDouble(0);
+                const keel::f64 eb = ep.elemAsDouble(1);
+                const keel::f64 er = el + ep.elemAsDouble(2);
+                const keel::f64 et = eb + ep.elemAsDouble(3);
+                constexpr keel::f64 kEps = 1e-4;
+                const bool overlapX = (el + kEps < right) && (left + kEps < er);
+                const bool overlapY = (eb + kEps < top) && (bottom + kEps < et);
+                if (overlapX && overlapY)
+                    toDelete.push_back(cid);
+            }
+        }
+        for (NodeId did : toDelete)
+            deleteNode(did, true);
+    }
+
     const NodeId axId = createAxes(fid);
     if (GraphicsNode *ax = findNode(axId)) {
         ax->subplotRows = m;

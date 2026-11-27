@@ -50,6 +50,10 @@ enum class ClassId : keel::u8 {
     BoxChart,
     Histogram2,
     HeatmapChart,
+    Rectangle,
+    Group,
+    FunctionLine,
+    ParameterizedFunctionLine,
 };
 
 enum class PropKind : keel::u8 {

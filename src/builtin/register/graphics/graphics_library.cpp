@@ -2257,7 +2257,6 @@ constexpr GfxRegEntry kMiscGfxFns[] = {
     {"shg",         &graphicsNoop_reg},
     {"refreshdata", &graphicsNoop_reg},
     {"datetick",    &graphicsNoop_reg},
-    {"rectangle",   &graphicsNoop_reg},
     {"uicontrol",   &uicontrol_reg},
     {"VideoWriter", &videoWriter_reg},
     {"open",        &open_reg},
@@ -2446,6 +2445,8 @@ void GraphicsLibrary::install(Engine &engine)
             "animatedline", "addpoints", "getpoints", "clearpoints",
             "annotation", "polarplot", "polarscatter", "fplot",
             "pie", "pie3", "slice", "light", "camlight", "boxchart", "histogram2", "heatmap",
+            "imshow", "hist", "waterfall", "ribbon", "comet", "comet3", "ezplot3", "fplot3",
+            "gscatter", "boxplot", "rectangle",
         };
         for (const char *n : kNames)
             if (nm == n) return true;

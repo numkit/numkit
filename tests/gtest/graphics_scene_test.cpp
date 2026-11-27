@@ -900,4 +900,60 @@ TEST_P(GraphicsSceneTest, FieldtestRegressionCompatibility)
     EXPECT_GE(evalScalar("yl8(2)"), 200.0);
 }
 
+TEST_P(GraphicsSceneTest, PartA200ScriptParityBuiltins)
+{
+    // 1. Matrix plot3 emits one Line per column; plot(vec, scalar) emits N 1-point lines
+    eval("f1 = figure('Visible', 'off'); [Xm, Ym] = meshgrid(1:4, 1:4); Zm = Xm + Ym;"
+         "h3 = plot3(Xm, Ym, Zm, 'ko');"
+         "f2 = figure('Visible', 'off'); hs = plot([1 2 3 4], 0, 'ro');");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(h3)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(h3(1).XData)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hs)"), 4.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hs(1).XData)"), 1.0);
+
+    // 2. hold on preserves XScale/YScale on semilogx; overlapping subplot replaces old axes
+    eval("f3 = figure('Visible', 'off'); hold on; semilogx(1:5, 1:5); xs3 = get(gca, 'XScale');"
+         "f4 = figure('Visible', 'off'); subplot(3,1,1); subplot(3,1,2); subplot(3,1,3);"
+         "subplot(2,1,1); subplot(2,1,2); nax4 = numel(f4.Children);");
+    EXPECT_EQ(evalString("xs3"), "linear");
+    EXPECT_DOUBLE_EQ(evalScalar("nax4"), 2.0);
+
+    // 3. surfc/meshc emit Surface + Contour pair; vectorized text emits N Text nodes
+    eval("f5 = figure('Visible', 'off'); Zp = peaks(6); hsc = surfc(Zp);"
+         "f6 = figure('Visible', 'off'); ht = text([1 2 3], [4 5 6], {'a', 'b', 'c'});");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hsc)"), 2.0);
+    EXPECT_EQ(evalString("hsc(1).Type"), "surface");
+    EXPECT_EQ(evalString("hsc(2).Type"), "contour");
+    EXPECT_EQ(evalString("hsc(2).ZLocation"), "zmin");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(ht)"), 3.0);
+    EXPECT_EQ(evalString("ht(2).String"), "b");
+
+    // 4. imshow, hist (Patch), waterfall (Patch), ribbon (Surfaces), comet3, fplot3, gscatter, rectangle
+    eval("f7 = figure('Visible', 'off'); him = imshow(rand(4, 5), []); ax7v = get(gca, 'Visible');"
+         "f8 = figure('Visible', 'off'); hist([1 2 2 3 3 3 4], 4); h8c = get(gca, 'Children');"
+         "f9 = figure('Visible', 'off'); hwf = waterfall(peaks(4));"
+         "f10 = figure('Visible', 'off'); hrb = ribbon(peaks(4));"
+         "f11 = figure('Visible', 'off'); comet3(1:5, 1:5, 1:5); h11c = get(gca, 'Children');"
+         "f12 = figure('Visible', 'off'); hfp3 = fplot3(@(t)cos(t), @(t)sin(t), @(t)t, [0 2*pi]);"
+         "f13 = figure('Visible', 'off'); hgs = gscatter([1 2 3 4], [2 3 4 5], [1 1 2 2]);"
+         "f14 = figure('Visible', 'off'); hrc = rectangle('Position', [1 2 3 4], 'LineStyle', '--');");
+    EXPECT_EQ(evalString("him.Type"), "image");
+    EXPECT_EQ(evalString("ax7v"), "off");
+    EXPECT_EQ(evalString("h8c(1).Type"), "patch");
+    EXPECT_EQ(evalString("hwf.Type"), "patch");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hrb)"), 4.0);
+    EXPECT_EQ(evalString("hrb(1).Type"), "surface");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(h11c)"), 3.0);
+    EXPECT_EQ(evalString("hfp3.Type"), "parameterizedfunctionline");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hgs)"), 2.0);
+    EXPECT_EQ(evalString("hrc.Type"), "rectangle");
+    EXPECT_DOUBLE_EQ(evalScalar("hrc.Position(3)"), 3.0);
+
+    // 5. Handle array preallocation with zeros() must not spawn ghost Patch nodes in Axes
+    eval("f15 = figure('Visible', 'off'); ax15 = axes(f15); hp = zeros(1, 3);"
+         "for k = 1:3, hp(k) = patch('Vertices', [0 0; 1 0; 0 1], 'Faces', [1 2 3]); end;"
+         "n15 = numel(ax15.Children);");
+    EXPECT_DOUBLE_EQ(evalScalar("n15"), 3.0);
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

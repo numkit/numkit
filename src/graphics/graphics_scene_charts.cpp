@@ -107,6 +107,10 @@ bool GraphicsScene::isChartClass(ClassId cls) noexcept
     case ClassId::AnimatedLine:
     case ClassId::BoxChart:
     case ClassId::Histogram2:
+    case ClassId::Rectangle:
+    case ClassId::Group:
+    case ClassId::FunctionLine:
+    case ClassId::ParameterizedFunctionLine:
         return true;
     default:
         return false;
@@ -298,6 +302,17 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         if (asciiEqualNoCase(getProperty(cid, "Visible", res).toString(), "off"))
             continue;
 
+        if (ch->classId == ClassId::Group) {
+            for (NodeId gcid : ch->children) {
+                const GraphicsNode *gc = findNode(gcid);
+                if (!gc) continue;
+                hasNonImage = true;
+                if (const Value *xd = gc->props.get("XData")) scanNumericBounds(*xd, xmin, xmax, anyX);
+                if (const Value *yd = gc->props.get("YData")) scanNumericBounds(*yd, ymin, ymax, anyY);
+                if (const Value *zd = gc->props.get("ZData")) scanNumericBounds(*zd, zmin, zmax, anyZ);
+            }
+            continue;
+        }
         if (ch->classId == ClassId::Histogram) {
             hasNonImage = true;
             if (const Value *be = ch->props.get("BinEdges"))
@@ -425,6 +440,25 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
                     if (keel::is_finite(lo)) ymin = anyY ? keel::min(ymin, lo) : lo;
                 }
             }
+        }
+        if (ch->classId == ClassId::Rectangle) {
+            if (const Value *pos = ch->props.get("Position"); pos && pos->isNumeric() && pos->numel() == 4) {
+                const keel::f64 rx0 = pos->elemAsDouble(0);
+                const keel::f64 ry0 = pos->elemAsDouble(1);
+                const keel::f64 rx1 = rx0 + pos->elemAsDouble(2);
+                const keel::f64 ry1 = ry0 + pos->elemAsDouble(3);
+                if (keel::is_finite(rx0) && keel::is_finite(rx1)) {
+                    const keel::f64 lo = keel::min(rx0, rx1), hi = keel::max(rx0, rx1);
+                    if (!anyX) { xmin = lo; xmax = hi; anyX = true; }
+                    else { xmin = keel::min(xmin, lo); xmax = keel::max(xmax, hi); }
+                }
+                if (keel::is_finite(ry0) && keel::is_finite(ry1)) {
+                    const keel::f64 lo = keel::min(ry0, ry1), hi = keel::max(ry0, ry1);
+                    if (!anyY) { ymin = lo; ymax = hi; anyY = true; }
+                    else { ymin = keel::min(ymin, lo); ymax = keel::max(ymax, hi); }
+                }
+            }
+            continue;
         }
         if (ch->classId == ClassId::Patch) {
             if (const Value *verts = ch->props.get("Vertices"); verts && verts->isNumeric() && !verts->isEmpty()) {

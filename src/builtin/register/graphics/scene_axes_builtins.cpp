@@ -633,24 +633,62 @@ void text_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     keel::usize idx = 0;
     const NodeId axId = resolveLeadingAxes(scene, args, idx);
 
-    keel::f64 x = 0.0, y = 0.0, z = 0.0;
-    keel::String str(mr);
     if (idx + 2 < args.size() && args[idx].isNumeric() && args[idx + 1].isNumeric()) {
-        x = args[idx].elemAsDouble(0);
-        y = args[idx + 1].elemAsDouble(0);
+        const Value &xv = args[idx];
+        const Value &yv = args[idx + 1];
+        const Value *zv = nullptr;
+        const Value *sv = nullptr;
         if (idx + 3 < args.size() && args[idx + 2].isNumeric()) {
-            z = args[idx + 2].elemAsDouble(0);
-            str = joinTextArg(args[idx + 3], mr);
+            zv = &args[idx + 2];
+            sv = &args[idx + 3];
             idx += 4;
         } else {
-            str = joinTextArg(args[idx + 2], mr);
+            sv = &args[idx + 2];
             idx += 3;
         }
-    } else if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
-        // text('Position', ..., 'String', ...) NV-only form
+
+        const keel::usize n = keel::max<keel::usize>(1, keel::max(xv.numel(), yv.numel()));
+        auto elemText = [&](const Value &sVal, keel::usize k) -> keel::String {
+            if (n == 1)
+                return joinTextArg(sVal, mr);
+            if (sVal.isCell()) {
+                if (sVal.numel() == 0) return keel::String(mr);
+                return sVal.cellAt(k < sVal.numel() ? k : sVal.numel() - 1).toString();
+            }
+            if (sVal.isString() && sVal.numel() > 1) {
+                return sVal.stringElem(k < sVal.numel() ? k : sVal.numel() - 1, mr);
+            }
+            if (sVal.isChar() && sVal.dims().rows() > 1) {
+                const keel::usize nr = sVal.dims().rows();
+                const keel::usize nc = sVal.dims().cols();
+                const keel::usize r = (k < nr) ? k : (nr - 1);
+                keel::String row(mr);
+                row.reserve(nc);
+                for (keel::usize c = 0; c < nc; ++c)
+                    row.push_back(static_cast<char>(sVal.charData()[r + c * nr] & 0x7Fu));
+                while (!row.empty() && row[row.size() - 1] == ' ')
+                    row.pop_back();
+                return row;
+            }
+            return joinTextArg(sVal, mr);
+        };
+
+        keel::Array<NodeId> created(mr);
+        created.reserve(n);
+        for (keel::usize k = 0; k < n; ++k) {
+            const keel::f64 x = xv.isEmpty() ? 0.0 : xv.elemAsDouble(k < xv.numel() ? k : xv.numel() - 1);
+            const keel::f64 y = yv.isEmpty() ? 0.0 : yv.elemAsDouble(k < yv.numel() ? k : yv.numel() - 1);
+            const keel::f64 z = (zv && !zv->isEmpty()) ? zv->elemAsDouble(k < zv->numel() ? k : zv->numel() - 1) : 0.0;
+            const NodeId tid = scene.createText(axId, x, y, z, elemText(*sv, k));
+            if (idx < args.size())
+                applyNV(scene, tid, args, idx, mr);
+            created.push_back(tid);
+        }
+        outs[0] = (nargout >= 1) ? scene.makeHandleColumn(created.as_ref(), mr) : Value();
+        return;
     }
 
-    const NodeId tid = scene.createText(axId, x, y, z, str);
+    const NodeId tid = scene.createText(axId, 0.0, 0.0, 0.0, {});
     if (idx < args.size())
         applyNV(scene, tid, args, idx, mr);
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(tid, mr) : Value();

@@ -361,6 +361,11 @@ void registerOneSceneClass(Engine &engine, ClassId cid)
             return scene.makeHandleValue(clId, mr);
         }
         if (GraphicsScene::isChartClass(cid) || cid == ClassId::TextBox) {
+            // Zero-arg default construction (e.g. during object-array preallocation/growth
+            // such as `h = zeros(1,5); h(1) = patch(...)`) must yield a GraphicsPlaceholder
+            // without spawning ghost live nodes in the current Axes.
+            if (args.empty())
+                return scene.makeEmptyPlaceholder(mr);
             const NodeId id = scene.createChartNode(cid, kInvalidNodeId, cid != ClassId::TextBox);
             if (cid == ClassId::Line) {
                 Value def = Value::matrix(1, 2, ValueType::DOUBLE, mr);
@@ -1192,6 +1197,10 @@ void registerSceneGraphics(Engine &engine)
     registerOneSceneClass(engine, ClassId::BoxChart);
     registerOneSceneClass(engine, ClassId::Histogram2);
     registerOneSceneClass(engine, ClassId::HeatmapChart);
+    registerOneSceneClass(engine, ClassId::Rectangle);
+    registerOneSceneClass(engine, ClassId::Group);
+    registerOneSceneClass(engine, ClassId::FunctionLine);
+    registerOneSceneClass(engine, ClassId::ParameterizedFunctionLine);
 
     auto regBoth = [&](const char *sub, const char *name,
                        void (*fn)(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &)) {

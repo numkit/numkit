@@ -1070,6 +1070,79 @@ inline constexpr ClassSchema kHeatmapChartSchema{
     kHeatmapChartProps, sizeof(kHeatmapChartProps) / sizeof(kHeatmapChartProps[0])
 };
 
+// ── Rectangle (matlab.graphics.primitive.Rectangle) ─────────────────────
+inline constexpr PropertySpec kRectangleProps[] = {
+    {"Position", PropKind::DoubleVec, PropFlag::AffectsLimits, nullptr, nullptr, 0, 4},
+    {"Curvature", PropKind::DoubleArray, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"FaceColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"EdgeColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"LineStyle", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_1, p3ArrayLen(kP3Enum_1), 0},
+    {"LineWidth", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"AlignVertexCenters", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Clipping", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Children", PropKind::HandleArray, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Parent", PropKind::Handle, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Visible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HandleVisibility", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_5, p3ArrayLen(kP3Enum_5), 0},
+    {"ButtonDownFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ContextMenu", PropKind::Handle, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BusyAction", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_6, p3ArrayLen(kP3Enum_6), 0},
+    {"BeingDeleted", PropKind::OnOff, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Interruptible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CreateFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DeleteFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Type", PropKind::String, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Tag", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"UserData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Selected", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"SelectionHighlight", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HitTest", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"PickableParts", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_7, p3ArrayLen(kP3Enum_7), 0},
+};
+inline constexpr ClassSchema kRectangleSchema{
+    ClassId::Rectangle, "matlab.graphics.primitive.Rectangle", "rectangle", "Rectangle",
+    kRectangleProps, sizeof(kRectangleProps) / sizeof(kRectangleProps[0])
+};
+
+// ── Group (matlab.graphics.primitive.Group) ─────────────────────────────
+inline constexpr PropertySpec kGroupProps[] = {
+    {"Children", PropKind::HandleArray, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Parent", PropKind::Handle, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Visible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HandleVisibility", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_5, p3ArrayLen(kP3Enum_5), 0},
+    {"ButtonDownFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ContextMenu", PropKind::Handle, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BusyAction", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_6, p3ArrayLen(kP3Enum_6), 0},
+    {"BeingDeleted", PropKind::OnOff, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Interruptible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CreateFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DeleteFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Type", PropKind::String, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Tag", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"UserData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Selected", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"SelectionHighlight", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HitTest", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"PickableParts", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_7, p3ArrayLen(kP3Enum_7), 0},
+    {"DisplayName", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Annotation", PropKind::Any, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+};
+inline constexpr ClassSchema kGroupSchema{
+    ClassId::Group, "matlab.graphics.primitive.Group", "hggroup", "Group",
+    kGroupProps, sizeof(kGroupProps) / sizeof(kGroupProps[0])
+};
+
+// ── FunctionLine & ParameterizedFunctionLine ────────────────────────────
+inline constexpr ClassSchema kFunctionLineSchema{
+    ClassId::FunctionLine, "matlab.graphics.function.FunctionLine", "functionline", "FunctionLine",
+    kLineProps, sizeof(kLineProps) / sizeof(kLineProps[0])
+};
+inline constexpr ClassSchema kParameterizedFunctionLineSchema{
+    ClassId::ParameterizedFunctionLine, "matlab.graphics.function.ParameterizedFunctionLine",
+    "parameterizedfunctionline", "ParameterizedFunctionLine",
+    kLineProps, sizeof(kLineProps) / sizeof(kLineProps[0])
+};
+
 } // anonymous namespace
 
 const ClassSchema &lineSchema() noexcept { return kLineSchema; }
@@ -1091,6 +1164,10 @@ const ClassSchema &lightSchema() noexcept { return kLightSchema; }
 const ClassSchema &boxChartSchema() noexcept { return kBoxChartSchema; }
 const ClassSchema &histogram2Schema() noexcept { return kHistogram2Schema; }
 const ClassSchema &heatmapChartSchema() noexcept { return kHeatmapChartSchema; }
+const ClassSchema &rectangleSchema() noexcept { return kRectangleSchema; }
+const ClassSchema &groupSchema() noexcept { return kGroupSchema; }
+const ClassSchema &functionLineSchema() noexcept { return kFunctionLineSchema; }
+const ClassSchema &parameterizedFunctionLineSchema() noexcept { return kParameterizedFunctionLineSchema; }
 
 Value factoryDefaultPhase3(ClassId cls, keel::StringRef prop, keel::Allocator *mr)
 {
@@ -1826,6 +1903,38 @@ Value factoryDefaultPhase3(ClassId cls, keel::StringRef prop, keel::Allocator *m
         if (prop == "Title" || prop == "XLabel" || prop == "YLabel"
             || prop == "XVariable" || prop == "YVariable" || prop == "ColorVariable") return Value::fromString("", mr);
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    case ClassId::Rectangle:
+        if (prop == "Position") return ([&](){ static constexpr keel::f64 kV[4] = {0.0, 0.0, 1.0, 1.0}; return makeP3Vec(kV, 4, mr); })();
+        if (prop == "Curvature") return ([&](){ static constexpr keel::f64 kV[2] = {0.0, 0.0}; return makeP3Vec(kV, 2, mr); })();
+        if (prop == "FaceColor") return Value::fromString("none", mr);
+        if (prop == "EdgeColor") return ([&](){ static constexpr keel::f64 kV[3] = {0.0, 0.0, 0.0}; return makeP3Vec(kV, 3, mr); })();
+        if (prop == "LineStyle") return Value::fromString("-", mr);
+        if (prop == "LineWidth") return Value::scalar(0.5, mr);
+        if (prop == "AlignVertexCenters" || prop == "Selected" || prop == "BeingDeleted") return Value::fromString("off", mr);
+        if (prop == "Clipping" || prop == "Visible" || prop == "HandleVisibility"
+            || prop == "SelectionHighlight" || prop == "HitTest" || prop == "Interruptible") return Value::fromString("on", mr);
+        if (prop == "PickableParts") return Value::fromString("visible", mr);
+        if (prop == "BusyAction") return Value::fromString("queue", mr);
+        if (prop == "Type") return Value::fromString("rectangle", mr);
+        if (prop == "Tag" || prop == "ButtonDownFcn" || prop == "CreateFcn" || prop == "DeleteFcn")
+            return Value::fromString("", mr);
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    case ClassId::Group:
+        if (prop == "Visible" || prop == "HandleVisibility" || prop == "SelectionHighlight"
+            || prop == "HitTest" || prop == "Interruptible") return Value::fromString("on", mr);
+        if (prop == "Selected" || prop == "BeingDeleted") return Value::fromString("off", mr);
+        if (prop == "PickableParts") return Value::fromString("visible", mr);
+        if (prop == "BusyAction") return Value::fromString("queue", mr);
+        if (prop == "Type") return Value::fromString("hggroup", mr);
+        if (prop == "Tag" || prop == "DisplayName" || prop == "ButtonDownFcn"
+            || prop == "CreateFcn" || prop == "DeleteFcn") return Value::fromString("", mr);
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    case ClassId::FunctionLine:
+        if (prop == "Type") return Value::fromString("functionline", mr);
+        return factoryDefaultPhase3(ClassId::Line, prop, mr);
+    case ClassId::ParameterizedFunctionLine:
+        if (prop == "Type") return Value::fromString("parameterizedfunctionline", mr);
+        return factoryDefaultPhase3(ClassId::Line, prop, mr);
     default:
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);
     }

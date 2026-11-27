@@ -48,6 +48,10 @@ const ClassSchema &lightSchema() noexcept;
 const ClassSchema &boxChartSchema() noexcept;
 const ClassSchema &histogram2Schema() noexcept;
 const ClassSchema &heatmapChartSchema() noexcept;
+const ClassSchema &rectangleSchema() noexcept;
+const ClassSchema &groupSchema() noexcept;
+const ClassSchema &functionLineSchema() noexcept;
+const ClassSchema &parameterizedFunctionLineSchema() noexcept;
 Value factoryDefaultPhase3(ClassId cls, keel::StringRef prop, keel::Allocator *mr);
 
 namespace {
@@ -380,6 +384,10 @@ const ClassSchema &schemaFor(ClassId id) noexcept
     case ClassId::BoxChart:         return boxChartSchema();
     case ClassId::Histogram2:       return histogram2Schema();
     case ClassId::HeatmapChart:     return heatmapChartSchema();
+    case ClassId::Rectangle:        return rectangleSchema();
+    case ClassId::Group:            return groupSchema();
+    case ClassId::FunctionLine:     return functionLineSchema();
+    case ClassId::ParameterizedFunctionLine: return parameterizedFunctionLineSchema();
     default:                        return kPlaceholderSchema;
     }
 }
@@ -417,6 +425,10 @@ inline constexpr ClassId kRegisteredSchemaIds[] = {
     ClassId::BoxChart,
     ClassId::Histogram2,
     ClassId::HeatmapChart,
+    ClassId::Rectangle,
+    ClassId::Group,
+    ClassId::FunctionLine,
+    ClassId::ParameterizedFunctionLine,
 };
 } // anonymous namespace
 
