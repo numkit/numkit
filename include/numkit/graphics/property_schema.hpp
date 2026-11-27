@@ -46,6 +46,10 @@ enum class ClassId : keel::u8 {
     Patch,
     AnimatedLine,
     TextBox,
+    Light,
+    BoxChart,
+    Histogram2,
+    HeatmapChart,
 };
 
 enum class PropKind : keel::u8 {

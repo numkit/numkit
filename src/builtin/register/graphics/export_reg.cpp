@@ -325,12 +325,6 @@ void graphicsNoop_reg(keel::ArrayRef<Value>, keel::usize,
     if (!outs.empty()) outs[0] = Value();
 }
 
-void light_reg(keel::ArrayRef<Value>, keel::usize,
-               keel::MutArrayRef<Value> outs, CallContext &ctx)
-{
-    if (!outs.empty()) outs[0] = Value::scalar(1.0, ctx.engine->allocator());
-}
-
 void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
                   keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
@@ -717,14 +711,11 @@ constexpr ExportRegEntry kExportFns[] = {
     {"lighting",       &graphicsNoop_reg},
     {"material",       &graphicsNoop_reg},
     {"movie",          &graphicsNoop_reg},
-    {"light",          &light_reg},
     {"getframe",       &getframe_reg},
     {"frame2im",       &frame2im_reg},
     {"im2frame",       &im2frame_reg},
     {"imtool",         &chartNoop_reg},
     {"implay",         &chartNoop_reg},
-    {"boxchart",       &chartNoop_reg},
-    {"heatmap",        &chartNoop_reg},
     {"probplot",       &chartNoop_reg},
     {"newplot",        &chartNoop_reg},
     {"zoom",           &chartNoop_reg},

@@ -761,4 +761,56 @@ TEST_P(GraphicsSceneTest, FieldtestRealWorldGraphicsCompatibility)
     EXPECT_DOUBLE_EQ(evalScalar("numel(hcf.LevelList)"), 11.0);
 }
 
+TEST_P(GraphicsSceneTest, FieldtestBlockBSecondaryChartsAndSchemas)
+{
+    // Exact R2025b property counts for the 4 new classes: Light(21), BoxChart(53), Histogram2(45), HeatmapChart(40)
+    eval("close all force;"
+         "f = figure('Visible', 'off'); ax = axes(f); hold(ax, 'on');"
+         "hl = light(ax, 'Position', [1 -5 3]);"
+         "hb = boxchart(ax, categorical([1 1 2 2]), [10 20 30 40], 'BoxFaceColor', [0.1 0.6 0.3]);"
+         "hh2 = histogram2(ax, [0 0.2 0.8 1], [0 0.3 0.7 1], [2 2], 'Normalization', 'pdf');"
+         "f_hm = figure('Visible', 'off');"
+         "subplot(2, 1, 1); plot([1 2], [3 4]);"
+         "subplot(2, 1, 2); hm = heatmap({'A','B'}, {'X','Y'}, [1 2; 3 4]); title('HM Title');");
+    EXPECT_EQ(evalString("class(hl)"), "matlab.graphics.primitive.Light");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(hl))"), 21.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hl.Position(2)"), -5.0);
+
+    EXPECT_EQ(evalString("class(hb)"), "matlab.graphics.chart.primitive.BoxChart");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(hb))"), 53.0);
+    EXPECT_NEAR(evalScalar("hb.BoxFaceColor(2)"), 0.6, 1e-12);
+
+    EXPECT_EQ(evalString("class(hh2)"), "matlab.graphics.chart.primitive.Histogram2");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(hh2))"), 45.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(hh2.Values, 1)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(hh2.Values, 2)"), 2.0);
+    EXPECT_NEAR(evalScalar("hh2.Values(1, 1)"), 2.0, 1e-12);
+    EXPECT_NEAR(evalScalar("hh2.Values(2, 2)"), 2.0, 1e-12);
+
+    EXPECT_EQ(evalString("class(hm)"), "matlab.graphics.chart.HeatmapChart");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(properties(hm))"), 40.0);
+    EXPECT_EQ(evalString("hm.Title"), "HM Title");
+    // heatmap replaced empty subplot(2,1,2) in place -> figure has 2 children (Axes + HeatmapChart)
+    EXPECT_DOUBLE_EQ(evalScalar("numel(f_hm.Children)"), 2.0);
+
+    // pie creates alternating Patch + Text children; slice creates Surface planes
+    eval("fp = figure('Visible', 'off'); axp = axes(fp);"
+         "hp = pie(axp, [1 2 3]);"
+         "fs = figure('Visible', 'off'); axs = axes(fs);"
+         "[X, Y, Z] = meshgrid(-2:1:2, -2:1:2, -2:1:2);"
+         "V = X .* exp(-X.^2 - Y.^2 - Z.^2);"
+         "hs = slice(axs, X, Y, Z, V, [-1 1], [], [0]);"
+         "fc = figure('Visible', 'off'); axc = axes(fc);"
+         "[~, hcc] = contour(axc, linspace(-0.115, 0.002, 20)' * ones(1, 20));");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hp)"), 6.0);
+    EXPECT_EQ(evalString("hp(1).Type"), "patch");
+    EXPECT_EQ(evalString("hp(2).Type"), "text");
+    EXPECT_EQ(evalString("hp(2).String"), "17%");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hs)"), 3.0);
+    EXPECT_EQ(evalString("hs(1).Type"), "surface");
+    EXPECT_DOUBLE_EQ(evalScalar("size(hs(1).XData, 1)"), 5.0);
+    EXPECT_DOUBLE_EQ(evalScalar("size(hs(1).XData, 2)"), 5.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hcc.LevelList)"), 12.0);
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

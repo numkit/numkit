@@ -879,6 +879,197 @@ inline constexpr ClassSchema kTextBoxSchema{
     kTextBoxProps, sizeof(kTextBoxProps) / sizeof(kTextBoxProps[0])
 };
 
+// ── Light (matlab.graphics.primitive.Light) — 21 public visible properties ─
+inline constexpr PropertySpec kLightProps[] = {
+    {"Color", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Style", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Position", PropKind::DoubleVec, PropFlag::None, nullptr, nullptr, 0, 3},
+    {"Children", PropKind::HandleArray, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Parent", PropKind::Handle, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Visible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HandleVisibility", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_5, p3ArrayLen(kP3Enum_5), 0},
+    {"ButtonDownFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ContextMenu", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BusyAction", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_6, p3ArrayLen(kP3Enum_6), 0},
+    {"BeingDeleted", PropKind::OnOff, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Interruptible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CreateFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DeleteFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Type", PropKind::String, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Tag", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"UserData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Selected", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"SelectionHighlight", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HitTest", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"PickableParts", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_7, p3ArrayLen(kP3Enum_7), 0},
+};
+inline constexpr ClassSchema kLightSchema{
+    ClassId::Light, "matlab.graphics.primitive.Light", "light", "Light",
+    kLightProps, sizeof(kLightProps) / sizeof(kLightProps[0])
+};
+
+// ── BoxChart (matlab.graphics.chart.primitive.BoxChart) — 53 public props ─
+inline constexpr PropertySpec kBoxChartProps[] = {
+    {"XData", PropKind::Any, PropFlag::None, "XDataMode", nullptr, 0, 0},
+    {"YData", PropKind::DoubleArray, PropFlag::None, "YDataMode", nullptr, 0, 0},
+    {"XDataMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YDataMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XVariable", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YVariable", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BoxWidth", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BoxFaceColor", PropKind::ColorOrAutoNone, PropFlag::None, "BoxFaceColorMode", nullptr, 0, 0},
+    {"BoxEdgeColor", PropKind::ColorOrAutoNone, PropFlag::None, "BoxEdgeColorMode", nullptr, 0, 0},
+    {"BoxMedianLineColor", PropKind::ColorOrAutoNone, PropFlag::None, "BoxMedianLineColorMode", nullptr, 0, 0},
+    {"BoxFaceAlpha", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CapWidth", PropKind::DoubleScalar, PropFlag::None, "CapWidthMode", nullptr, 0, 0},
+    {"WhiskerLineColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"LineWidth", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"WhiskerLineStyle", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"MarkerColor", PropKind::ColorOrAutoNone, PropFlag::None, "MarkerColorMode", nullptr, 0, 0},
+    {"MarkerSize", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"MarkerStyle", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Clipping", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Orientation", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorGroupLayout", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Notch", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"JitterOutliers", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorGroupWidth", PropKind::DoubleScalar, PropFlag::None, "ColorGroupWidthMode", nullptr, 0, 0},
+    {"BoxFaceColorMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BoxEdgeColorMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BoxMedianLineColorMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CapWidthMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"MarkerColorMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorGroupWidthMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Children", PropKind::HandleArray, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Parent", PropKind::Handle, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Visible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HandleVisibility", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_5, p3ArrayLen(kP3Enum_5), 0},
+    {"SourceTable", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DisplayName", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Annotation", PropKind::Any, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"HitTest", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"PickableParts", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_7, p3ArrayLen(kP3Enum_7), 0},
+    {"SeriesIndex", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DataTipTemplate", PropKind::Any, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"ButtonDownFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ContextMenu", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BusyAction", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_6, p3ArrayLen(kP3Enum_6), 0},
+    {"BeingDeleted", PropKind::OnOff, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Interruptible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CreateFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DeleteFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Type", PropKind::String, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Tag", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"UserData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Selected", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"SelectionHighlight", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+};
+inline constexpr ClassSchema kBoxChartSchema{
+    ClassId::BoxChart, "matlab.graphics.chart.primitive.BoxChart", "boxchart", "Boxchart",
+    kBoxChartProps, sizeof(kBoxChartProps) / sizeof(kBoxChartProps[0])
+};
+
+// ── Histogram2 (matlab.graphics.chart.primitive.Histogram2) — 45 public props
+inline constexpr PropertySpec kHistogram2Props[] = {
+    {"Data", PropKind::DoubleArray, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BinCounts", PropKind::DoubleArray, PropFlag::None, "BinCountsMode", nullptr, 0, 0},
+    {"NumBins", PropKind::DoubleVec, PropFlag::None, nullptr, nullptr, 2, 0},
+    {"XBinEdges", PropKind::DoubleArray, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YBinEdges", PropKind::DoubleArray, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BinWidth", PropKind::DoubleVec, PropFlag::None, nullptr, nullptr, 2, 0},
+    {"BinMethod", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XBinLimits", PropKind::DoubleVec, PropFlag::None, "XBinLimitsMode", nullptr, 2, 0},
+    {"YBinLimits", PropKind::DoubleVec, PropFlag::None, "YBinLimitsMode", nullptr, 2, 0},
+    {"Normalization", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"FaceColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"EdgeColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"LineWidth", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"LineStyle", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"FaceLighting", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BinCountsMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XBinLimitsMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YBinLimitsMode", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DisplayStyle", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"FaceAlpha", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"EdgeAlpha", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ShowEmptyBins", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Values", PropKind::DoubleArray, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Children", PropKind::HandleArray, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Parent", PropKind::Handle, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Visible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HandleVisibility", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_5, p3ArrayLen(kP3Enum_5), 0},
+    {"DisplayName", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Annotation", PropKind::Any, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"DataTipTemplate", PropKind::Any, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Selected", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"SelectionHighlight", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HitTest", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"PickableParts", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_7, p3ArrayLen(kP3Enum_7), 0},
+    {"ButtonDownFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ContextMenu", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"BusyAction", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_6, p3ArrayLen(kP3Enum_6), 0},
+    {"BeingDeleted", PropKind::OnOff, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Interruptible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CreateFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"DeleteFcn", PropKind::Callback, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Type", PropKind::String, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"Tag", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"UserData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"SeriesIndex", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+};
+inline constexpr ClassSchema kHistogram2Schema{
+    ClassId::Histogram2, "matlab.graphics.chart.primitive.Histogram2", "histogram2", "Histogram2",
+    kHistogram2Props, sizeof(kHistogram2Props) / sizeof(kHistogram2Props[0])
+};
+
+// ── HeatmapChart (matlab.graphics.chart.HeatmapChart) — 40 public props ──
+inline constexpr PropertySpec kHeatmapChartProps[] = {
+    {"Title", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XLabel", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YLabel", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"FontSize", PropKind::DoubleScalar, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Interpreter", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"SourceTable", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XVariable", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YVariable", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorVariable", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorMethod", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorData", PropKind::DoubleArray, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XDisplayData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YDisplayData", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XDisplayLabels", PropKind::StringOrCellStr, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YDisplayLabels", PropKind::StringOrCellStr, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"XLimits", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"YLimits", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorLimits", PropKind::DoubleVec, PropFlag::None, nullptr, nullptr, 2, 0},
+    {"ColorDisplayData", PropKind::DoubleArray, PropFlag::ReadOnly, nullptr, nullptr, 0, 0},
+    {"MissingDataColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"FontColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Colormap", PropKind::DoubleMatrix, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CellLabelFormat", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"CellLabelColor", PropKind::ColorOrAutoNone, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"GridVisible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"FontName", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorScaling", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"MissingDataLabel", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"ColorbarVisible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"OuterPosition", PropKind::DoubleVec, PropFlag::PreserveOnReset, nullptr, nullptr, 4, 0},
+    {"Units", PropKind::String, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"InnerPosition", PropKind::DoubleVec, PropFlag::PreserveOnReset, nullptr, nullptr, 4, 0},
+    {"Position", PropKind::DoubleVec, PropFlag::PreserveOnReset, nullptr, nullptr, 4, 0},
+    {"PositionConstraint", PropKind::String, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"Parent", PropKind::Handle, PropFlag::PreserveOnReset, nullptr, nullptr, 0, 0},
+    {"Visible", PropKind::OnOff, PropFlag::None, nullptr, nullptr, 0, 0},
+    {"HandleVisibility", PropKind::Enum, PropFlag::None, nullptr, kP3Enum_5, p3ArrayLen(kP3Enum_5), 0},
+    {"Layout", PropKind::Any, PropFlag::None, nullptr, nullptr, 0, 0},
+};
+inline constexpr ClassSchema kHeatmapChartSchema{
+    ClassId::HeatmapChart, "matlab.graphics.chart.HeatmapChart", "heatmap", "Heatmap",
+    kHeatmapChartProps, sizeof(kHeatmapChartProps) / sizeof(kHeatmapChartProps[0])
+};
+
 } // anonymous namespace
 
 const ClassSchema &lineSchema() noexcept { return kLineSchema; }
@@ -896,6 +1087,10 @@ const ClassSchema &imageSchema() noexcept { return kImageSchema; }
 const ClassSchema &stairSchema() noexcept { return kStairSchema; }
 const ClassSchema &animatedLineSchema() noexcept { return kAnimatedLineSchema; }
 const ClassSchema &textBoxSchema() noexcept { return kTextBoxSchema; }
+const ClassSchema &lightSchema() noexcept { return kLightSchema; }
+const ClassSchema &boxChartSchema() noexcept { return kBoxChartSchema; }
+const ClassSchema &histogram2Schema() noexcept { return kHistogram2Schema; }
+const ClassSchema &heatmapChartSchema() noexcept { return kHeatmapChartSchema; }
 
 Value factoryDefaultPhase3(ClassId cls, keel::StringRef prop, keel::Allocator *mr)
 {
@@ -1543,6 +1738,93 @@ Value factoryDefaultPhase3(ClassId cls, keel::StringRef prop, keel::Allocator *m
         if (prop == "SelectionHighlight") return Value::fromString("on", mr);
         if (prop == "HitTest") return Value::fromString("on", mr);
         if (prop == "PickableParts") return Value::fromString("visible", mr);
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    case ClassId::Light:
+        if (prop == "Color") return ([&](){ static constexpr keel::f64 kV[3] = {1.0, 1.0, 1.0}; return makeP3Vec(kV, 3, mr); })();
+        if (prop == "Style") return Value::fromString("infinite", mr);
+        if (prop == "Position") return ([&](){ static constexpr keel::f64 kV[3] = {1.0, 0.0, 1.0}; return makeP3Vec(kV, 3, mr); })();
+        if (prop == "Visible") return Value::fromString("on", mr);
+        if (prop == "HandleVisibility") return Value::fromString("on", mr);
+        if (prop == "BusyAction") return Value::fromString("queue", mr);
+        if (prop == "BeingDeleted") return Value::fromString("off", mr);
+        if (prop == "Interruptible") return Value::fromString("on", mr);
+        if (prop == "Type") return Value::fromString("light", mr);
+        if (prop == "Tag") return Value::fromString("", mr);
+        if (prop == "Selected") return Value::fromString("off", mr);
+        if (prop == "SelectionHighlight") return Value::fromString("on", mr);
+        if (prop == "HitTest") return Value::fromString("on", mr);
+        if (prop == "PickableParts") return Value::fromString("visible", mr);
+        if (prop == "ButtonDownFcn" || prop == "CreateFcn" || prop == "DeleteFcn") return Value::fromString("", mr);
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    case ClassId::BoxChart:
+        if (prop == "XDataMode" || prop == "BoxFaceColorMode" || prop == "BoxEdgeColorMode"
+            || prop == "BoxMedianLineColorMode" || prop == "CapWidthMode"
+            || prop == "MarkerColorMode" || prop == "ColorGroupWidthMode") return Value::fromString("auto", mr);
+        if (prop == "YDataMode") return Value::fromString("manual", mr);
+        if (prop == "BoxWidth") return Value::scalar(0.5, mr);
+        if (prop == "BoxFaceColor" || prop == "BoxEdgeColor" || prop == "BoxMedianLineColor" || prop == "MarkerColor")
+            return ([&](){ static constexpr keel::f64 kV[3] = {0.066, 0.443, 0.745}; return makeP3Vec(kV, 3, mr); })();
+        if (prop == "BoxFaceAlpha") return Value::scalar(0.2, mr);
+        if (prop == "CapWidth") return Value::scalar(0.25, mr);
+        if (prop == "WhiskerLineColor")
+            return ([&](){ static constexpr keel::f64 kV[3] = {0.12941176470588237, 0.12941176470588237, 0.12941176470588237}; return makeP3Vec(kV, 3, mr); })();
+        if (prop == "LineWidth" || prop == "ColorGroupWidth" || prop == "SeriesIndex") return Value::scalar(1.0, mr);
+        if (prop == "WhiskerLineStyle") return Value::fromString("-", mr);
+        if (prop == "MarkerSize") return Value::scalar(6.0, mr);
+        if (prop == "MarkerStyle") return Value::fromString("o", mr);
+        if (prop == "Orientation") return Value::fromString("vertical", mr);
+        if (prop == "ColorGroupLayout") return Value::fromString("grouped", mr);
+        if (prop == "Clipping" || prop == "Visible" || prop == "HandleVisibility"
+            || prop == "HitTest" || prop == "Interruptible" || prop == "SelectionHighlight") return Value::fromString("on", mr);
+        if (prop == "Notch" || prop == "JitterOutliers" || prop == "BeingDeleted" || prop == "Selected") return Value::fromString("off", mr);
+        if (prop == "PickableParts") return Value::fromString("visible", mr);
+        if (prop == "BusyAction") return Value::fromString("queue", mr);
+        if (prop == "Type") return Value::fromString("boxchart", mr);
+        if (prop == "XVariable" || prop == "YVariable" || prop == "DisplayName" || prop == "Tag"
+            || prop == "ButtonDownFcn" || prop == "CreateFcn" || prop == "DeleteFcn") return Value::fromString("", mr);
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    case ClassId::Histogram2:
+        if (prop == "NumBins") return ([&](){ static constexpr keel::f64 kV[2] = {1.0, 1.0}; return makeP3Vec(kV, 2, mr); })();
+        if (prop == "BinWidth") return ([&](){ static constexpr keel::f64 kV[2] = {1.0, 1.0}; return makeP3Vec(kV, 2, mr); })();
+        if (prop == "XBinLimits" || prop == "YBinLimits") return ([&](){ static constexpr keel::f64 kV[2] = {0.0, 1.0}; return makeP3Vec(kV, 2, mr); })();
+        if (prop == "BinMethod" || prop == "FaceColor" || prop == "BinCountsMode"
+            || prop == "XBinLimitsMode" || prop == "YBinLimitsMode") return Value::fromString("auto", mr);
+        if (prop == "Normalization") return Value::fromString("count", mr);
+        if (prop == "EdgeColor")
+            return ([&](){ static constexpr keel::f64 kV[3] = {0.12941176470588237, 0.12941176470588237, 0.12941176470588237}; return makeP3Vec(kV, 3, mr); })();
+        if (prop == "LineWidth") return Value::scalar(0.5, mr);
+        if (prop == "LineStyle") return Value::fromString("-", mr);
+        if (prop == "FaceLighting") return Value::fromString("lit", mr);
+        if (prop == "DisplayStyle") return Value::fromString("bar3", mr);
+        if (prop == "FaceAlpha" || prop == "EdgeAlpha" || prop == "SeriesIndex") return Value::scalar(1.0, mr);
+        if (prop == "ShowEmptyBins" || prop == "Selected" || prop == "BeingDeleted") return Value::fromString("off", mr);
+        if (prop == "Visible" || prop == "HandleVisibility" || prop == "SelectionHighlight"
+            || prop == "HitTest" || prop == "Interruptible") return Value::fromString("on", mr);
+        if (prop == "PickableParts") return Value::fromString("visible", mr);
+        if (prop == "BusyAction") return Value::fromString("queue", mr);
+        if (prop == "Type") return Value::fromString("histogram2", mr);
+        if (prop == "DisplayName" || prop == "Tag" || prop == "ButtonDownFcn"
+            || prop == "CreateFcn" || prop == "DeleteFcn") return Value::fromString("", mr);
+        return Value::matrix(0, 0, ValueType::DOUBLE, mr);
+    case ClassId::HeatmapChart:
+        if (prop == "FontSize") return Value::scalar(10.0, mr);
+        if (prop == "Interpreter") return Value::fromString("tex", mr);
+        if (prop == "ColorMethod") return Value::fromString("none", mr);
+        if (prop == "ColorLimits") return ([&](){ static constexpr keel::f64 kV[2] = {0.0, 1.0}; return makeP3Vec(kV, 2, mr); })();
+        if (prop == "MissingDataColor" || prop == "FontColor")
+            return ([&](){ static constexpr keel::f64 kV[3] = {0.12941176470588237, 0.12941176470588237, 0.12941176470588237}; return makeP3Vec(kV, 3, mr); })();
+        if (prop == "CellLabelFormat") return Value::fromString("%0.4g", mr);
+        if (prop == "CellLabelColor") return Value::fromString("auto", mr);
+        if (prop == "GridVisible" || prop == "ColorbarVisible" || prop == "Visible" || prop == "HandleVisibility") return Value::fromString("on", mr);
+        if (prop == "FontName") return Value::fromString("Helvetica", mr);
+        if (prop == "ColorScaling") return Value::fromString("scaled", mr);
+        if (prop == "MissingDataLabel") return Value::fromString("NaN", mr);
+        if (prop == "OuterPosition") return ([&](){ static constexpr keel::f64 kV[4] = {0.0, 0.0, 1.0, 1.0}; return makeP3Vec(kV, 4, mr); })();
+        if (prop == "InnerPosition" || prop == "Position") return ([&](){ static constexpr keel::f64 kV[4] = {0.13, 0.11, 0.744849, 0.815}; return makeP3Vec(kV, 4, mr); })();
+        if (prop == "Units") return Value::fromString("normalized", mr);
+        if (prop == "PositionConstraint") return Value::fromString("outerposition", mr);
+        if (prop == "Title" || prop == "XLabel" || prop == "YLabel"
+            || prop == "XVariable" || prop == "YVariable" || prop == "ColorVariable") return Value::fromString("", mr);
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);
     default:
         return Value::matrix(0, 0, ValueType::DOUBLE, mr);

@@ -1188,6 +1188,10 @@ void registerSceneGraphics(Engine &engine)
     registerOneSceneClass(engine, ClassId::Stair);
     registerOneSceneClass(engine, ClassId::AnimatedLine);
     registerOneSceneClass(engine, ClassId::TextBox);
+    registerOneSceneClass(engine, ClassId::Light);
+    registerOneSceneClass(engine, ClassId::BoxChart);
+    registerOneSceneClass(engine, ClassId::Histogram2);
+    registerOneSceneClass(engine, ClassId::HeatmapChart);
 
     auto regBoth = [&](const char *sub, const char *name,
                        void (*fn)(keel::ArrayRef<Value>, keel::usize, keel::MutArrayRef<Value>, CallContext &)) {

@@ -2445,6 +2445,7 @@ void GraphicsLibrary::install(Engine &engine)
             "histogram", "area", "image", "imagesc", "stairs",
             "animatedline", "addpoints", "getpoints", "clearpoints",
             "annotation", "polarplot", "polarscatter", "fplot",
+            "pie", "pie3", "slice", "light", "camlight", "boxchart", "histogram2", "heatmap",
         };
         for (const char *n : kNames)
             if (nm == n) return true;

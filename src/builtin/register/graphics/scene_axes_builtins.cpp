@@ -49,7 +49,8 @@ inline bool isLabelOwner(const GraphicsScene &scene, NodeId id) noexcept
 {
     const GraphicsNode *n = scene.findNode(id);
     return n && (n->classId == ClassId::Axes || n->classId == ClassId::PolarAxes
-                 || n->classId == ClassId::TiledChartLayout || n->classId == ClassId::ColorBar);
+                 || n->classId == ClassId::TiledChartLayout || n->classId == ClassId::ColorBar
+                 || n->classId == ClassId::HeatmapChart);
 }
 
 void applyNV(GraphicsScene &scene, NodeId id,
@@ -489,8 +490,18 @@ void labelHelper(const char *slot, keel::ArrayRef<Value> args, keel::usize nargo
             idx = 1;
         }
     }
-    if (targetId == kInvalidNodeId)
-        targetId = scene.ensureCurrentAxes();
+    if (targetId == kInvalidNodeId) {
+        // If the figure's most recent child is a HeatmapChart (e.g. heatmap(...); title('...')),
+        // target it directly instead of creating a new overlapping Axes.
+        const NodeId figId = scene.currentFigureId();
+        if (const GraphicsNode *fn = scene.findNode(figId); fn && !fn->children.empty()) {
+            const NodeId topId = fn->children.front();
+            if (const GraphicsNode *tn = scene.findNode(topId); tn && tn->classId == ClassId::HeatmapChart)
+                targetId = topId;
+        }
+        if (targetId == kInvalidNodeId)
+            targetId = scene.ensureCurrentAxes();
+    }
 
     const keel::String txt = (idx < args.size()) ? joinTextArg(args[idx], mr) : keel::String(mr);
     const NodeId textId = scene.setLabelText(targetId, slot, txt);

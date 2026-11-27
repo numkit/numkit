@@ -44,6 +44,10 @@ const ClassSchema &imageSchema() noexcept;
 const ClassSchema &stairSchema() noexcept;
 const ClassSchema &animatedLineSchema() noexcept;
 const ClassSchema &textBoxSchema() noexcept;
+const ClassSchema &lightSchema() noexcept;
+const ClassSchema &boxChartSchema() noexcept;
+const ClassSchema &histogram2Schema() noexcept;
+const ClassSchema &heatmapChartSchema() noexcept;
 Value factoryDefaultPhase3(ClassId cls, keel::StringRef prop, keel::Allocator *mr);
 
 namespace {
@@ -363,6 +367,10 @@ const ClassSchema &schemaFor(ClassId id) noexcept
     case ClassId::Stair:            return stairSchema();
     case ClassId::AnimatedLine:     return animatedLineSchema();
     case ClassId::TextBox:          return textBoxSchema();
+    case ClassId::Light:            return lightSchema();
+    case ClassId::BoxChart:         return boxChartSchema();
+    case ClassId::Histogram2:       return histogram2Schema();
+    case ClassId::HeatmapChart:     return heatmapChartSchema();
     default:                        return kPlaceholderSchema;
     }
 }
@@ -396,6 +404,10 @@ inline constexpr ClassId kRegisteredSchemaIds[] = {
     ClassId::Stair,
     ClassId::AnimatedLine,
     ClassId::TextBox,
+    ClassId::Light,
+    ClassId::BoxChart,
+    ClassId::Histogram2,
+    ClassId::HeatmapChart,
 };
 } // anonymous namespace
 

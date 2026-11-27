@@ -473,6 +473,12 @@ NodeId GraphicsScene::setLabelText(NodeId ownerId, keel::StringRef slot, keel::S
     if (!ow)
         return kInvalidNodeId;
     NodeId targetId = kInvalidNodeId;
+    if (ow->classId == ClassId::HeatmapChart) {
+        if (asciiEqualNoCase(slot, "title"))       setProperty(ownerId, "Title", Value::fromString(str, mr_), mr_);
+        else if (asciiEqualNoCase(slot, "xlabel")) setProperty(ownerId, "XLabel", Value::fromString(str, mr_), mr_);
+        else if (asciiEqualNoCase(slot, "ylabel")) setProperty(ownerId, "YLabel", Value::fromString(str, mr_), mr_);
+        return ownerId;
+    }
     if (ow->classId == ClassId::ColorBar) {
         if (asciiEqualNoCase(slot, "ylabel") || asciiEqualNoCase(slot, "xlabel")
             || asciiEqualNoCase(slot, "title")) {

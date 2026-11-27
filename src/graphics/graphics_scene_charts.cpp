@@ -105,6 +105,8 @@ bool GraphicsScene::isChartClass(ClassId cls) noexcept
     case ClassId::Image:
     case ClassId::Stair:
     case ClassId::AnimatedLine:
+    case ClassId::BoxChart:
+    case ClassId::Histogram2:
         return true;
     default:
         return false;
@@ -190,7 +192,7 @@ Value GraphicsScene::nextSeriesColor(NodeId axId, keel::i32 &seriesIdxOut, keel:
 NodeId GraphicsScene::createChartNode(ClassId cls, NodeId parentId, bool consumeSeriesColor)
 {
     NodeId actualParent = parentId;
-    if (cls == ClassId::TextBox) {
+    if (cls == ClassId::TextBox || cls == ClassId::HeatmapChart) {
         if (actualParent == kInvalidNodeId)
             actualParent = ensureCurrentFigure();
     } else {
@@ -205,7 +207,8 @@ NodeId GraphicsScene::createChartNode(ClassId cls, NodeId parentId, bool consume
             n->rulerAxis = 'Y';
     }
     if (consumeSeriesColor && cls != ClassId::TextBox && cls != ClassId::Image
-        && cls != ClassId::Surface && cls != ClassId::Contour && cls != ClassId::Patch) {
+        && cls != ClassId::Surface && cls != ClassId::Contour && cls != ClassId::Patch
+        && cls != ClassId::Light && cls != ClassId::HeatmapChart) {
         keel::i32 sIdx = 1;
         Value rgb = nextSeriesColor(actualParent, sIdx, mr_);
         if (GraphicsNode *n = findNode(id)) {
@@ -214,6 +217,11 @@ NodeId GraphicsScene::createChartNode(ClassId cls, NodeId parentId, bool consume
             if (cls == ClassId::Bar || cls == ClassId::Area || cls == ClassId::Histogram) {
                 if (!n->props.contains("FaceColor"))
                     n->props.put(keel::String::from("FaceColor", mr_), rgb);
+            } else if (cls == ClassId::BoxChart) {
+                if (!n->props.contains("BoxFaceColor"))       n->props.put(keel::String::from("BoxFaceColor", mr_), rgb);
+                if (!n->props.contains("BoxEdgeColor"))       n->props.put(keel::String::from("BoxEdgeColor", mr_), rgb);
+                if (!n->props.contains("BoxMedianLineColor")) n->props.put(keel::String::from("BoxMedianLineColor", mr_), rgb);
+                if (!n->props.contains("MarkerColor"))        n->props.put(keel::String::from("MarkerColor", mr_), rgb);
             } else if (cls == ClassId::Scatter) {
                 if (!n->props.contains("CData"))
                     n->props.put(keel::String::from("CData", mr_), rgb);
@@ -286,6 +294,21 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
             if (const Value *vals = ch->props.get("Values")) {
                 scanNumericBounds(*vals, ymin, ymax, anyY);
                 hasBaseZero = true;
+            }
+            continue;
+        }
+        if (ch->classId == ClassId::Histogram2) {
+            hasNonImage = true;
+            if (const Value *xbe = ch->props.get("XBinEdges"))
+                scanNumericBounds(*xbe, xmin, xmax, anyX);
+            if (const Value *ybe = ch->props.get("YBinEdges"))
+                scanNumericBounds(*ybe, ymin, ymax, anyY);
+            if (const Value *vals = ch->props.get("Values")) {
+                scanNumericBounds(*vals, cmin, cmax, anyC);
+                if (isView3D) {
+                    scanNumericBounds(*vals, zmin, zmax, anyZ);
+                    if (anyZ && zmin > 0.0) zmin = 0.0;
+                }
             }
             continue;
         }
