@@ -1072,6 +1072,28 @@ TEST_P(GraphicsSceneTest, FieldtestParityFixesColorSurflPrintRgbDatacursorAndTab
     EXPECT_DOUBLE_EQ(evalScalar("numel(hlg)"), 0.0);
     EXPECT_DOUBLE_EQ(evalScalar("lw_hl"), 2.5);
     EXPECT_EQ(evalString("np_mode"), "replace");
+
+    // 7. yyaxis Children returns only objects belonging to the active Y-axis side
+    eval("f6 = figure('Visible', 'off'); ax6 = axes(f6);"
+         "bar(ax6, [1 2 3]);"
+         "n_pre = numel(ax6.Children);"
+         "yyaxis(ax6, 'left'); n_left0 = numel(ax6.Children);"
+         "yyaxis(ax6, 'right'); n_right0 = numel(ax6.Children);"
+         "plot(ax6, [4 5 6]); n_right1 = numel(ax6.Children);"
+         "t_right = ax6.Children(1).Type;"
+         "yyaxis(ax6, 'left'); n_left1 = numel(ax6.Children);"
+         "t_left = ax6.Children(1).Type;"
+         "n_all_bar = numel(findall(ax6, 'Type', 'bar'));"
+         "n_all_line = numel(findall(ax6, 'Type', 'line'));");
+    EXPECT_DOUBLE_EQ(evalScalar("n_pre"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("n_left0"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("n_right0"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("n_right1"), 1.0);
+    EXPECT_EQ(evalString("t_right"), "line");
+    EXPECT_DOUBLE_EQ(evalScalar("n_left1"), 1.0);
+    EXPECT_EQ(evalString("t_left"), "bar");
+    EXPECT_DOUBLE_EQ(evalScalar("n_all_bar"), 1.0);
+    EXPECT_DOUBLE_EQ(evalScalar("n_all_line"), 1.0);
 }
 
 INSTANTIATE_DUAL(GraphicsSceneTest);

@@ -195,6 +195,10 @@ NodeId GraphicsScene::allocateNode(ClassId cls, NodeId parentId)
     node.classId = cls;
     node.parentId = parentId;
     node.version = generation_ + 1;
+    if (const GraphicsNode *pn = findNode(parentId);
+        pn && pn->classId == ClassId::Axes && pn->yyRightActive) {
+        node.rulerAxis = 'Y';
+    }
 
     // Snapshot any active ancestor defaults for this class at creation time
     // (matches reference engine: removing a default later does not retroactively
@@ -682,11 +686,17 @@ keel::Array<NodeId> GraphicsScene::visibleChildren(NodeId id, keel::Allocator *a
     const GraphicsNode *n = findNode(id);
     if (!n)
         return out;
+    const bool filterYySide = (n->classId == ClassId::Axes && n->yAxisRightId != kInvalidNodeId);
+    const char activeSide = n->yyRightActive ? 'Y' : '\0';
     out.reserve(n->children.size());
     for (keel::usize i = n->children.size(); i > 0; --i) {
         const NodeId cid = n->children[i - 1];
-        if (findNode(cid) != nullptr && isHandleVisible(cid))
-            out.push_back(cid);
+        const GraphicsNode *cn = findNode(cid);
+        if (!cn || !isHandleVisible(cid))
+            continue;
+        if (filterYySide && cn->rulerAxis != activeSide)
+            continue;
+        out.push_back(cid);
     }
     return out;
 }

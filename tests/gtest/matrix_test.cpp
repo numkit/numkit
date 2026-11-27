@@ -2142,4 +2142,30 @@ TEST_P(GridKronTest, ThreeDSliceAutoGrowAndMultiSeriesLogPlot)
     eval("set(h(1:2), 'LineWidth', 2);");
 }
 
+TEST_P(GridKronTest, SmallMatrixWideRhsMatmulAndSolveAccuracy)
+{
+    // Small-M/K wide-N matmul (exercises single-threaded low-work path in matmulDoubleLoop)
+    eval("A = [1.5 -2.25; 3.0 0.75];"
+         "B = [1:64; -(1:64)*0.5];"
+         "C = A * B;"
+         "C_ref = [A(1,1)*B(1,:) + A(1,2)*B(2,:); A(2,1)*B(1,:) + A(2,2)*B(2,:)];"
+         "err_mm = max(abs(C - C_ref), [], 'all');");
+    EXPECT_LT(evalScalar("err_mm"), 1e-12);
+
+    // Small-n wide-RHS mldivide (real 2x2 with pivoting + complex 3x3 + singular fallback)
+    eval("Q = [0.25 1.5; 2.0 -0.5];"
+         "X_true = [linspace(-3, 3, 257); sin(1:257)];"
+         "DX = Q * X_true;"
+         "X_sol = Q \\ DX;"
+         "err_real = max(abs(X_sol - X_true), [], 'all');"
+         "Qc = [1+1i 2 0; 0 3-1i 1; 2i 1 4+2i];"
+         "Xc_true = [1:65; (1:65)*1i; -(1:65) + 0.5i];"
+         "Xc_sol = Qc \\ (Qc * Xc_true);"
+         "err_cplx = max(abs(Xc_sol - Xc_true), [], 'all');"
+         "Xs = [1 2; 2 4] \\ [3; 6];");
+    EXPECT_LT(evalScalar("err_real"), 1e-12);
+    EXPECT_LT(evalScalar("err_cplx"), 1e-12);
+    EXPECT_TRUE(std::isnan(evalScalar("Xs(1)")) || std::isinf(evalScalar("Xs(1)")));
+}
+
 INSTANTIATE_DUAL(GridKronTest);
