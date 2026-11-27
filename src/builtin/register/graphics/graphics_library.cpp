@@ -152,6 +152,32 @@ void graphStub_reg(keel::ArrayRef<Value> args, keel::usize,
     outs[0] = keel::move(s);
 }
 
+void datacursormode_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                        keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto *mr = ctx.engine->allocator();
+    keel::String enableStr = keel::String::from("on");
+    for (keel::usize i = 0; i < args.size(); ++i) {
+        if (args[i].isChar() || args[i].isString()) {
+            const keel::String tok = args[i].toString();
+            if (tok.equals_ignore_ascii_case("off"))
+                enableStr = keel::String::from("off");
+            else if (tok.equals_ignore_ascii_case("on"))
+                enableStr = keel::String::from("on");
+        }
+    }
+    if (nargout >= 1) {
+        Value s = Value::structure(mr);
+        s.setFieldAll("Enable", Value::fromString(enableStr, mr));
+        s.setFieldAll("SnapToDataVertex", Value::fromString("on", mr));
+        s.setFieldAll("DisplayStyle", Value::fromString("datatip", mr));
+        s.setFieldAll("UpdateFcn", Value::Empty);
+        outs[0] = keel::move(s);
+    } else {
+        outs[0] = Value();
+    }
+}
+
 void listfonts_reg(keel::ArrayRef<Value>, keel::usize,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
@@ -195,8 +221,10 @@ constexpr GfxRegEntry kMiscGfxFns[] = {
     {"makedatatip", &graphicsNoop_reg},
     {"sound",       &graphicsNoop_reg},
     {"soundsc",     &graphicsNoop_reg},
-    {"zplane",      &graphicsNoop_reg},
-    {"listfonts",   &listfonts_reg},
+    {"zplane",         &graphicsNoop_reg},
+    {"datacursormode", &datacursormode_reg},
+    {"createDatatip",  &datacursormode_reg},
+    {"listfonts",      &listfonts_reg},
 };
 
 } // anonymous namespace

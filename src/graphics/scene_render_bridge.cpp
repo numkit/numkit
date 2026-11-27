@@ -99,6 +99,14 @@ keel::String buildStyleKV(const GraphicsScene &scene, NodeId cid, keel::Allocato
     } else if (scene.hasProperty(cid, "FaceColor")) {
         const Value fc = scene.getProperty(cid, "FaceColor", mr);
         if (fc.isNumeric() && fc.numel() >= 3) addKV("color", rgbToHexStr(fc));
+    } else if (scene.hasProperty(cid, "CData")) {
+        const Value cd = scene.getProperty(cid, "CData", mr);
+        if (cd.isNumeric() && cd.numel() == 3) {
+            addKV("color", rgbToHexStr(cd));
+        } else if (scene.hasProperty(cid, "MarkerEdgeColor")) {
+            const Value mec = scene.getProperty(cid, "MarkerEdgeColor", mr);
+            if (mec.isNumeric() && mec.numel() >= 3) addKV("color", rgbToHexStr(mec));
+        }
     }
     if (scene.hasProperty(cid, "LineStyle")) {
         const keel::String ls = scene.getProperty(cid, "LineStyle", mr).toString();

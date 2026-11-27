@@ -1008,4 +1008,70 @@ TEST_P(GraphicsSceneTest, Phase5DebloatExtraBuiltins)
     EXPECT_EQ(evalString("hu.String"), "OK");
 }
 
+TEST_P(GraphicsSceneTest, FieldtestParityFixesColorSurflPrintRgbDatacursorAndTable)
+{
+    // 1. Bracketed RGB triplet string in Color property
+    eval("close all force;"
+         "f = figure('Visible', 'off');"
+         "h = plot(1:5, 1:5, 'color', '[0, 0.5, 0]');"
+         "c = h.Color;");
+    EXPECT_DOUBLE_EQ(evalScalar("c(1)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("c(2)"), 0.5);
+    EXPECT_DOUBLE_EQ(evalScalar("c(3)"), 0.0);
+
+    // 2. surfl with lighting mode token ('light' / 'cdata') and lighting vector s
+    eval("Z = peaks(10);"
+         "f2 = figure('Visible', 'off');"
+         "hs1 = surfl(Z, 'light');"
+         "t1 = hs1.Type;"
+         "hs2 = surfl(Z, [-60 30], 'cdata');"
+         "t2 = hs2.Type;");
+    EXPECT_EQ(evalString("t1"), "surface");
+    EXPECT_EQ(evalString("t2"), "surface");
+
+    // 3. print('-RGBImage', '-r0') returns HxWx3 uint8 array without requiring filename
+    eval("f3 = figure('Visible', 'off');"
+         "scatter([1 2 3], [1 2 3], 20, 'r', 'filled');"
+         "rgb = print('-RGBImage', '-r0');");
+    EXPECT_EQ(evalString("class(rgb)"), "uint8");
+    EXPECT_EQ(evalScalar("ndims(rgb)"), 3.0);
+    EXPECT_EQ(evalScalar("size(rgb, 3)"), 3.0);
+    EXPECT_GT(evalScalar("size(rgb, 1)"), 16.0);
+    EXPECT_GT(evalScalar("size(rgb, 2)"), 16.0);
+    // Red scatter points must be preserved in raster export
+    EXPECT_GT(evalScalar("nnz((rgb(:,:,1) > 150) & (rgb(:,:,2) < 100) & (rgb(:,:,3) < 100))"), 0.0);
+
+    // 4. datacursormode toggle & struct return
+    eval("dcm = datacursormode(f3); datacursormode on;");
+    EXPECT_EQ(evalString("dcm.Enable"), "on");
+
+    // 5. sqrtm 2x2 real closed-form fast path accuracy
+    eval("M = [16, 8; 8, 16]; R = sqrtm(M); err_sq = max(abs(R*R - M), [], 'all');");
+    EXPECT_LT(evalScalar("err_sq"), 1e-13);
+
+    // 5b. pcolor stores C in CData and zeros(size(C)) in ZData
+    eval("fpc = figure('Visible', 'off'); hpc = pcolor([1 2; 3 4]);");
+    EXPECT_DOUBLE_EQ(evalScalar("max(abs(hpc.ZData(:)))"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hpc.CData(2, 2)"), 4.0);
+
+    // 6. Case-insensitive findall/findobj + empty set() no-op + newplot + axis square on PolarAxes
+    eval("f4 = figure('Visible', 'off');"
+         "plot(1:4, [1 4 2 3]); xlabel('X'); title('T');"
+         "hl = findall(f4, 'type', 'line');"
+         "ht = findall(f4, 'type', 'text');"
+         "hlg = findall(f4, 'type', 'legend');"
+         "set(hl, 'linewidth', 2.5);"
+         "lw_hl = hl(1).LineWidth;"
+         "set(ht, 'FontSize', 14);"
+         "set(hlg, 'FontSize', 14);"
+         "set([], 'LineWidth', 2);"
+         "cax = newplot; np_mode = get(cax, 'NextPlot');"
+         "f5 = figure('Visible', 'off'); polar(0:0.5:3, ones(1,7)); axis square;");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hl)"), 1.0);
+    EXPECT_GE(evalScalar("numel(ht)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hlg)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("lw_hl"), 2.5);
+    EXPECT_EQ(evalString("np_mode"), "replace");
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

@@ -114,15 +114,34 @@ void applyNameValuePairs(GraphicsScene &scene, NodeId id,
 void collectSubtree(const GraphicsScene &scene, NodeId root, bool includeHidden,
                     keel::i32 maxDepth, keel::i32 depth, keel::Array<NodeId> &out)
 {
-    if (!scene.findNode(root))
+    const GraphicsNode *n = scene.findNode(root);
+    if (!n)
         return;
+    auto pushUnique = [&](NodeId id) {
+        for (NodeId ex : out) {
+            if (ex == id) return;
+        }
+        out.push_back(id);
+    };
     if (includeHidden || root == kRootNodeId || scene.isHandleVisible(root))
-        out.push_back(root);
+        pushUnique(root);
     if (maxDepth >= 0 && depth >= maxDepth)
         return;
     auto kids = includeHidden ? scene.allChildren(root) : scene.visibleChildren(root);
     for (NodeId cid : kids)
         collectSubtree(scene, cid, includeHidden, maxDepth, depth + 1, out);
+    // Hidden decoration children of Axes/PolarAxes (Title, Subtitle, X/Y/ZLabel, Legend, ColorBar)
+    // are discovered by findall (includeHidden=true).
+    if (includeHidden) {
+        const NodeId extras[] = {
+            n->titleId, n->subtitleId, n->xLabelId, n->yLabelId,
+            n->yLabelRightId, n->zLabelId, n->legendId, n->colorBarId
+        };
+        for (NodeId eid : extras) {
+            if (eid != kInvalidNodeId)
+                collectSubtree(scene, eid, includeHidden, maxDepth, depth + 1, out);
+        }
+    }
 }
 
 // ── BuiltinClass hooks for Scene classes ────────────────────────────────
@@ -696,6 +715,15 @@ bool trySceneGet(keel::ArrayRef<Value> args, keel::MutArrayRef<Value> outs, Call
         return false;
     }
 
+    // Empty handle array ([] or 0x0 GraphicsPlaceholder): valid no-op in get()
+    if ((args[0].isNumeric() && args[0].isEmpty())
+        || (args[0].isObject() && args[0].objectCount() == 0)) {
+        outs[0] = (args.size() >= 2 && args[1].isCell())
+                      ? Value::cell(0, args[1].numel(), mr)
+                      : Value::matrix(0, 0, ValueType::DOUBLE, mr);
+        return true;
+    }
+
     if (!isSceneGraphicsHandle(args[0]))
         return false;
 
@@ -766,6 +794,13 @@ bool trySceneSet(keel::ArrayRef<Value> args, keel::usize nargout,
         return false;
     auto &scene = coreEngine(ctx).graphicsScene();
     auto *mr = ctx.engine->allocator();
+
+    // Empty handle array ([] or 0x0 GraphicsPlaceholder): valid no-op in set()
+    if ((args[0].isNumeric() && args[0].isEmpty())
+        || (args[0].isObject() && args[0].objectCount() == 0)) {
+        outs[0] = Value();
+        return true;
+    }
 
     keel::Array<NodeId> targets(mr);
     if (args[0].isNumeric() && args[0].numel() == 1 && args[0].elemAsDouble(0) == 0.0) {

@@ -106,9 +106,10 @@ struct ExportArgs {
     const FigureState *fig = nullptr;
     FigureState projectedFig;
     bool useProjected = false;
+    bool rgbImage = false;
     keel::String path;
     keel::String ext;       // from filename or explicit format
-    keel::i32 dpi = 150;          // MATLAB png default; scales the 840×630 base
+    keel::i32 dpi = 150;          // default raster resolution; scales the 840x630 base
 
     const FigureState *resolvedFigure() const noexcept
     {
@@ -172,18 +173,34 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
         keel::String sl = s.clone();
         sl.to_ascii_lower_in_place();
         if (!s.empty() && s[0] == '-') {
-            // print-style flags: -dpng / -dsvg / -r150 / -ochr…
-            if (sl.size() > 2 && sl[1] == 'd')
+            // print-style flags: -dpng / -dsvg / -r150 / -r0 / -RGBImage / -ochr…
+            if (sl == "-rgbimage") {
+                out.rgbImage = true;
+            } else if (sl.size() > 2 && sl[1] == 'd') {
                 out.ext = keel::String::from(sl.substr(2));
-            else if (sl.size() > 2 && sl[1] == 'r') {
+            } else if (sl.size() > 2 && sl[1] == 'r') {
                 keel::i32 dpiVal = 0;
                 if (auto parsed = keel::parse_i64(sl.substr(2)); parsed.is_ok())
                     dpiVal = keel::as<keel::i32>(parsed.value());
-                out.dpi = keel::max(30, dpiVal);
+                out.dpi = (dpiVal == 0) ? 96 : keel::max(30, dpiVal);
             }
             // other print options (-painters, -opengl, -bestfit, …)
             // accepted and ignored
             continue;
+        }
+        // Name-Value options for exportgraphics (e.g. 'Resolution', 400).
+        if (havePath && i + 1 < args.size()) {
+            if (sl == "resolution" && args[i + 1].isScalar()) {
+                const keel::i32 dpiVal = keel::as<keel::i32>(args[i + 1].toScalar());
+                out.dpi = keel::max(30, dpiVal);
+                ++i;
+                continue;
+            }
+            if (sl == "backgroundcolor" || sl == "contenttype" || sl == "append"
+                || sl == "colorspace" || sl == "preserveaspectratio") {
+                ++i;
+                continue;
+            }
         }
         // A char with an extension that is not a known bare FORMAT is
         // the filename; a bare known format is a format override.
@@ -206,6 +223,8 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
             out.useProjected = true;
         }
     }
+    if (out.rgbImage)
+        return out;
     if (!havePath)
         throw numkit::Error(keel::format("{}: a filename is required", who).c_str());
     if (out.ext.empty())
@@ -301,9 +320,27 @@ void print_reg(keel::ArrayRef<Value> args, keel::usize,
                keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "print");
-    ExportArgs ea = parseExportArgs(coreEngine(ctx), args, "print",
+    auto &eng = coreEngine(ctx);
+    ExportArgs ea = parseExportArgs(eng, args, "print",
                                     /*needTarget=*/true);
-    runExport(coreEngine(ctx), ea, "print");
+    if (ea.rgbImage) {
+        const FigureState *targetFig = ea.resolvedFigure();
+        if (!targetFig)
+            throw numkit::Error("print: no figure to export");
+        const keel::i32 W = keel::max(64, (keel::i32)(840.0 * ea.dpi / 150.0));
+        const keel::i32 H = keel::max(64, (keel::i32)(630.0 * ea.dpi / 150.0));
+        keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*targetFig, W, H);
+        const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
+        Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, eng.allocator());
+        keel::u8 *d = A.uint8DataMut();
+        for (keel::usize r = 0; r < Hp; ++r)
+            for (keel::usize c = 0; c < Wp; ++c)
+                for (keel::usize ch = 0; ch < 3; ++ch)
+                    d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
+        outs[0] = keel::move(A);
+        return;
+    }
+    runExport(eng, ea, "print");
     outs[0] = Value();
 }
 
@@ -311,6 +348,31 @@ void graphicsNoop_reg(keel::ArrayRef<Value>, keel::usize,
                       keel::MutArrayRef<Value> outs, CallContext &)
 {
     if (!outs.empty()) outs[0] = Value();
+}
+
+void newplot_reg(keel::ArrayRef<Value> args, keel::usize nargout,
+                 keel::MutArrayRef<Value> outs, CallContext &ctx)
+{
+    auto &scene = coreEngine(ctx).graphicsScene();
+    auto *mr = ctx.engine->allocator();
+    gfx::NodeId axId = gfx::kInvalidNodeId;
+    if (!args.empty() && isSceneGraphicsHandle(args[0])) {
+        const gfx::NodeId hid = graphicsHandleIdOf(args[0]);
+        if (const auto *node = scene.findNode(hid)) {
+            if (node->classId == gfx::ClassId::Axes || node->classId == gfx::ClassId::PolarAxes)
+                axId = hid;
+            else if (node->classId == gfx::ClassId::Figure)
+                axId = scene.ensureCurrentAxes(hid);
+        }
+    }
+    if (axId == gfx::kInvalidNodeId)
+        axId = scene.ensureCurrentAxes();
+    const keel::String np = scene.getProperty(axId, "NextPlot", mr).toString();
+    if (np.equals_ignore_ascii_case("replace"))
+        scene.clearAxes(axId, true);
+    else if (np.equals_ignore_ascii_case("replacechildren"))
+        scene.clearAxes(axId, false);
+    outs[0] = (nargout >= 1) ? scene.makeHandleValue(axId, mr) : Value();
 }
 
 void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
@@ -705,7 +767,7 @@ constexpr ExportRegEntry kExportFns[] = {
     {"im2frame",       &im2frame_reg},
     {"imtool",         &chartNoop_reg},
     {"implay",         &chartNoop_reg},
-    {"newplot",        &chartNoop_reg},
+    {"newplot",        &newplot_reg},
     {"zoom",           &chartNoop_reg},
     {"pan",            &chartNoop_reg},
     {"rotate3d",       &chartNoop_reg},

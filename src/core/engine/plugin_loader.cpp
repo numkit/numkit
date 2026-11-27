@@ -440,14 +440,15 @@ bool PluginLoader::tryAutoLoadForFunction(keel::StringRef functionName)
     if (firstDot != keel::kInvalidIndex) {
         keel::String pkgKey = keel::format("@pkg:{}", functionName.substr(0, firstDot));
         const auto *libPath = manifestIndex_.get(pkgKey);
-        if (!libPath) {
-            return false;
+        if (libPath) {
+            try {
+                return loadModule(*libPath);
+            } catch (...) {
+                return false;
+            }
         }
-        try {
-            return loadModule(*libPath);
-        } catch (...) {
-            return false;
-        }
+        // Fallback: allow a plugin manifest to export a dotted symbol directly
+        // (e.g. "dsp.IIRFilter" exported by numkit_signal).
     }
 
     const auto *libPath = manifestIndex_.get(functionName);

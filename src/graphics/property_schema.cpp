@@ -8,6 +8,7 @@
 #include <keel/format.h>
 #include <keel/math.h>
 #include <keel/memory.h>
+#include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 #include <keel/utf8.h>
@@ -531,6 +532,38 @@ Value parseColorSpec(const Value &v, bool allowNone, bool allowAuto,
                 return makeRgb(keel::as<keel::f64>(r1 * 16u + r2) / 255.0,
                                keel::as<keel::f64>(g1 * 16u + g2) / 255.0,
                                keel::as<keel::f64>(b1 * 16u + b2) / 255.0, mr);
+            }
+        }
+        // Bracketed RGB triplet string: '[r, g, b]' or '[r g b]'
+        {
+            keel::StringRef tr = s.as_ref();
+            while (!tr.empty() && keel::is_ascii_space(tr[0])) tr = tr.substr(1);
+            while (!tr.empty() && keel::is_ascii_space(tr[tr.size() - 1])) tr = tr.substr(0, tr.size() - 1);
+            if (tr.size() >= 3 && tr[0] == '[' && tr[tr.size() - 1] == ']') {
+                keel::StringRef inner = tr.substr(1, tr.size() - 2);
+                keel::f64 vals[4] = {0.0, 0.0, 0.0, 1.0};
+                keel::usize nVals = 0;
+                bool ok = true;
+                keel::usize p = 0;
+                while (p < inner.size()) {
+                    while (p < inner.size() && (keel::is_ascii_space(inner[p]) || inner[p] == ',')) ++p;
+                    if (p >= inner.size()) break;
+                    keel::usize q = p;
+                    while (q < inner.size() && !keel::is_ascii_space(inner[q]) && inner[q] != ',') ++q;
+                    if (nVals >= 4) { ok = false; break; }
+                    auto parsed = keel::parse_f64(inner.substr(p, q - p));
+                    if (!parsed.is_ok()) { ok = false; break; }
+                    vals[nVals++] = parsed.value();
+                    p = q;
+                }
+                if (ok && (nVals == 3 || nVals == 4)) {
+                    const keel::f64 r = vals[0], g = vals[1], b = vals[2], a = vals[3];
+                    if (keel::is_finite(r) && keel::is_finite(g) && keel::is_finite(b) && keel::is_finite(a)
+                        && r >= 0.0 && r <= 1.0 && g >= 0.0 && g <= 1.0
+                        && b >= 0.0 && b <= 1.0 && a >= 0.0 && a <= 1.0) {
+                        return makeRgb(r, g, b, mr);
+                    }
+                }
             }
         }
     }

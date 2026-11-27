@@ -985,16 +985,20 @@ const UserFunction *Engine::resolveMFile_(keel::StringRef name)
     if (mFileReg_->mFileMissCache.contains(missKey))
         return nullptr;
 
-    // Build search-path list: script-dir first (if any), then mPath_.
-    // The implicit script-dir entry is what makes sibling lookup work
-    // without addpath — `caller.m` calling `helper(x)` resolves against
-    // the directory the running script came from. Routes through the
-    // script's FS via `resolvePath` (which also falls back to the
-    // origin's fsName when the relative path has no scheme).
+    // Build search-path list: script-dir first (if any), then current working
+    // folder (pwd), then mPath_. The reference engine always resolves the
+    // current working folder ahead of entries on the search path.
+    keel::String actualCwd = fsCtx_.cwd().clone();
+    if (actualCwd.empty()) {
+        if (auto *nfs = findVirtualFS("native"))
+            actualCwd = nfs->cwd();
+    }
     keel::Array<keel::StringRef> searchDirs;
-    searchDirs.reserve(mFileReg_->mPath.size() + (curDirRef.empty() ? 0 : 1));
+    searchDirs.reserve(mFileReg_->mPath.size() + 2);
     if (!curDirRef.empty())
         searchDirs.push_back(curDirRef);
+    if (!actualCwd.empty() && actualCwd.as_ref() != curDirRef)
+        searchDirs.push_back(actualCwd.as_ref());
     for (const auto &p : mFileReg_->mPath)
         searchDirs.push_back(p.as_ref());
 

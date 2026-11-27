@@ -1232,37 +1232,41 @@ void axis_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!args[i].isChar() && !args[i].isString())
             continue;
         const keel::String opt = args[i].toString();
+        auto setIfHas = [&](keel::StringRef pName, const Value &val) {
+            if (scene.hasProperty(axId, pName))
+                scene.setProperty(axId, pName, val, mr);
+        };
         if (asciiEqualNoCase(opt, "equal")) {
             Value dar = Value::matrix(1, 3, ValueType::DOUBLE, mr);
             dar.doubleDataMut()[0] = 1.0; dar.doubleDataMut()[1] = 1.0; dar.doubleDataMut()[2] = 1.0;
-            scene.setProperty(axId, "DataAspectRatio", dar, mr);
+            setIfHas("DataAspectRatio", dar);
         } else if (asciiEqualNoCase(opt, "square")) {
             Value pbar = Value::matrix(1, 3, ValueType::DOUBLE, mr);
             pbar.doubleDataMut()[0] = 1.0; pbar.doubleDataMut()[1] = 1.0; pbar.doubleDataMut()[2] = 1.0;
-            scene.setProperty(axId, "PlotBoxAspectRatio", pbar, mr);
+            setIfHas("PlotBoxAspectRatio", pbar);
         } else if (asciiEqualNoCase(opt, "image")) {
             Value dar = Value::matrix(1, 3, ValueType::DOUBLE, mr);
             dar.doubleDataMut()[0] = 1.0; dar.doubleDataMut()[1] = 1.0; dar.doubleDataMut()[2] = 1.0;
-            scene.setProperty(axId, "DataAspectRatio", dar, mr);
-            scene.setProperty(axId, "XLimitMethod", Value::fromString("tight", mr), mr);
-            scene.setProperty(axId, "YLimitMethod", Value::fromString("tight", mr), mr);
+            setIfHas("DataAspectRatio", dar);
+            setIfHas("XLimitMethod", Value::fromString("tight", mr));
+            setIfHas("YLimitMethod", Value::fromString("tight", mr));
         } else if (asciiEqualNoCase(opt, "normal")) {
-            scene.setProperty(axId, "DataAspectRatioMode", Value::fromString("auto", mr), mr);
-            scene.setProperty(axId, "PlotBoxAspectRatioMode", Value::fromString("auto", mr), mr);
+            setIfHas("DataAspectRatioMode", Value::fromString("auto", mr));
+            setIfHas("PlotBoxAspectRatioMode", Value::fromString("auto", mr));
         } else if (asciiEqualNoCase(opt, "tight") || asciiEqualNoCase(opt, "padded") || asciiEqualNoCase(opt, "tickaligned")) {
-            scene.setProperty(axId, "XLimitMethod", args[i], mr);
-            scene.setProperty(axId, "YLimitMethod", args[i], mr);
-            scene.setProperty(axId, "ZLimitMethod", args[i], mr);
+            setIfHas("XLimitMethod", args[i]);
+            setIfHas("YLimitMethod", args[i]);
+            setIfHas("ZLimitMethod", args[i]);
         } else if (asciiEqualNoCase(opt, "auto") || asciiEqualNoCase(opt, "manual")) {
-            scene.setProperty(axId, "XLimMode", args[i], mr);
-            scene.setProperty(axId, "YLimMode", args[i], mr);
-            scene.setProperty(axId, "ZLimMode", args[i], mr);
+            setIfHas("XLimMode", args[i]);
+            setIfHas("YLimMode", args[i]);
+            setIfHas("ZLimMode", args[i]);
         } else if (asciiEqualNoCase(opt, "ij")) {
-            scene.setProperty(axId, "YDir", Value::fromString("reverse", mr), mr);
+            setIfHas("YDir", Value::fromString("reverse", mr));
         } else if (asciiEqualNoCase(opt, "xy")) {
-            scene.setProperty(axId, "YDir", Value::fromString("normal", mr), mr);
+            setIfHas("YDir", Value::fromString("normal", mr));
         } else if (asciiEqualNoCase(opt, "off") || asciiEqualNoCase(opt, "on")) {
-            scene.setProperty(axId, "Visible", Value::fromString(asciiEqualNoCase(opt, "on") ? "on" : "off", mr), mr);
+            setIfHas("Visible", Value::fromString(asciiEqualNoCase(opt, "on") ? "on" : "off", mr));
         }
     }
     outs[0] = (nargout >= 1) ? getLimVec() : Value();

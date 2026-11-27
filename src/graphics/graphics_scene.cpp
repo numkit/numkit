@@ -829,7 +829,7 @@ bool GraphicsScene::hasProperty(NodeId id, keel::StringRef rawProp) const noexce
         }
     }
     const keel::StringRef eff = resolveHiddenPropAlias(*this, n, rawProp);
-    return schemaFor(n->classId).findExact(eff) != nullptr;
+    return schemaFor(n->classId).findExactNoCase(eff) != nullptr;
 }
 
 Value GraphicsScene::makeEmptyPlaceholder(keel::Allocator *mr) const

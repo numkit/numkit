@@ -296,6 +296,44 @@ static auto parseXlsxGrid = [](keel::StringRef bytes, keel::StringRef sheetSpec,
 };
 
 static auto parseCsvGrid = [](keel::StringRef content) -> keel::Array<keel::Array<GridCell>> {
+    // Auto-detect delimiter from the first few non-empty lines:
+    // comma/tab (default) → semicolon → whitespace runs (e.g. space-separated .data/.csv).
+    enum class DelimMode { CommaTab, Semicolon, Whitespace };
+    DelimMode delimMode = DelimMode::CommaTab;
+    {
+        keel::usize nCommaTab = 0, nSemi = 0, nSpace = 0, sampled = 0;
+        keel::usize p = 0;
+        while (p < content.size() && sampled < 5) {
+            keel::usize nl = content.find('\n', p);
+            keel::usize e = (nl == keel::kInvalidIndex) ? content.size() : nl;
+            keel::StringRef ln = content.substr(p, e - p);
+            if (!ln.empty() && ln[ln.size() - 1] == '\r') ln = ln.substr(0, ln.size() - 1);
+            p = (nl == keel::kInvalidIndex) ? content.size() : (nl + 1);
+            bool ws = true;
+            for (keel::usize k = 0; k < ln.size(); ++k)
+                if (!keel::is_ascii_space(ln[k])) { ws = false; break; }
+            if (ws) continue;
+            ++sampled;
+            bool inQ = false;
+            bool prevSp = true;
+            for (keel::usize k = 0; k < ln.size(); ++k) {
+                char ch = ln[k];
+                if (ch == '"') { inQ = !inQ; prevSp = false; continue; }
+                if (inQ) continue;
+                if (ch == ',' || ch == '\t') { ++nCommaTab; prevSp = true; }
+                else if (ch == ';') { ++nSemi; prevSp = true; }
+                else if (ch == ' ') {
+                    if (!prevSp) { ++nSpace; prevSp = true; }
+                } else {
+                    prevSp = false;
+                }
+            }
+        }
+        if (nCommaTab > 0) delimMode = DelimMode::CommaTab;
+        else if (nSemi > 0) delimMode = DelimMode::Semicolon;
+        else if (nSpace > 0) delimMode = DelimMode::Whitespace;
+    }
+
     keel::Array<keel::Array<GridCell>> rows;
     keel::usize maxC = 0;
     keel::usize pos = 0;
@@ -313,48 +351,78 @@ static auto parseCsvGrid = [](keel::StringRef content) -> keel::Array<keel::Arra
             continue;
 
         keel::Array<GridCell> row;
-        keel::usize i = 0;
-        while (i <= line.size()) {
-            if (i == line.size()) {
-                if (!line.empty() && (line[line.size() - 1] == ',' || line[line.size() - 1] == '\t'))
-                    row.push_back(GridCell{false, false, keel::String()});
-                break;
-            }
-            if (line[i] == '"') {
-                keel::String tok;
-                ++i;
-                while (i < line.size()) {
-                    if (line[i] == '"') {
-                        if (i + 1 < line.size() && line[i + 1] == '"') {
-                            tok.push_back('"');
-                            i += 2;
-                        } else {
-                            ++i;
-                            break;
-                        }
-                    } else {
-                        tok.push_back(line[i++]);
-                    }
-                }
-                while (i < line.size() && line[i] != ',' && line[i] != '\t')
+        if (delimMode == DelimMode::Whitespace) {
+            keel::usize i = 0;
+            while (i < line.size()) {
+                while (i < line.size() && keel::is_ascii_space(line[i])) ++i;
+                if (i >= line.size()) break;
+                if (line[i] == '"') {
+                    keel::String tok;
                     ++i;
-                if (i < line.size()) ++i;
-                bool present = !tok.empty();
-                row.push_back(GridCell{present, true, keel::move(tok)});
-            } else {
-                keel::usize nextSep = i;
-                while (nextSep < line.size() && line[nextSep] != ',' && line[nextSep] != '\t')
-                    ++nextSep;
-                keel::StringRef rawTok = line.substr(i, nextSep - i);
-                keel::usize a = 0, b = rawTok.size();
-                while (a < b && keel::is_ascii_space(rawTok[a])) ++a;
-                while (b > a && keel::is_ascii_space(rawTok[b - 1])) --b;
-                keel::String tok = keel::String::from(rawTok.substr(a, b - a));
-                bool present = !tok.empty();
-                row.push_back(GridCell{present, false, keel::move(tok)});
-                if (nextSep == line.size())
+                    while (i < line.size()) {
+                        if (line[i] == '"') {
+                            if (i + 1 < line.size() && line[i + 1] == '"') { tok.push_back('"'); i += 2; }
+                            else { ++i; break; }
+                        } else {
+                            tok.push_back(line[i++]);
+                        }
+                    }
+                    bool present = !tok.empty();
+                    row.push_back(GridCell{present, true, keel::move(tok)});
+                } else {
+                    keel::usize start = i;
+                    while (i < line.size() && !keel::is_ascii_space(line[i])) ++i;
+                    keel::String tok = keel::String::from(line.substr(start, i - start));
+                    row.push_back(GridCell{true, false, keel::move(tok)});
+                }
+            }
+        } else {
+            auto isSep = [&](char ch) -> bool {
+                return (delimMode == DelimMode::Semicolon) ? (ch == ';') : (ch == ',' || ch == '\t');
+            };
+            keel::usize i = 0;
+            while (i <= line.size()) {
+                if (i == line.size()) {
+                    if (!line.empty() && isSep(line[line.size() - 1]))
+                        row.push_back(GridCell{false, false, keel::String()});
                     break;
-                i = nextSep + 1;
+                }
+                if (line[i] == '"') {
+                    keel::String tok;
+                    ++i;
+                    while (i < line.size()) {
+                        if (line[i] == '"') {
+                            if (i + 1 < line.size() && line[i + 1] == '"') {
+                                tok.push_back('"');
+                                i += 2;
+                            } else {
+                                ++i;
+                                break;
+                            }
+                        } else {
+                            tok.push_back(line[i++]);
+                        }
+                    }
+                    while (i < line.size() && !isSep(line[i]))
+                        ++i;
+                    if (i < line.size()) ++i;
+                    bool present = !tok.empty();
+                    row.push_back(GridCell{present, true, keel::move(tok)});
+                } else {
+                    keel::usize nextSep = i;
+                    while (nextSep < line.size() && !isSep(line[nextSep]))
+                        ++nextSep;
+                    keel::StringRef rawTok = line.substr(i, nextSep - i);
+                    keel::usize a = 0, b = rawTok.size();
+                    while (a < b && keel::is_ascii_space(rawTok[a])) ++a;
+                    while (b > a && keel::is_ascii_space(rawTok[b - 1])) --b;
+                    keel::String tok = keel::String::from(rawTok.substr(a, b - a));
+                    bool present = !tok.empty();
+                    row.push_back(GridCell{present, false, keel::move(tok)});
+                    if (nextSep == line.size())
+                        break;
+                    i = nextSep + 1;
+                }
             }
         }
         if (row.size() > maxC) maxC = row.size();
@@ -512,6 +580,7 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
     keel::String sheetName(alloc);
     keel::i32 sheetNum = 1;
     bool preserveNames = false;
+    keel::i32 readVarNamesMode = -1; // -1=auto, 0=false, 1=true
     keel::Array<keel::String> treatAsMissing(alloc);
     keel::usize kvStart = 1;
     if (args.size() >= 2 && args[1].isStruct()) {
@@ -540,6 +609,8 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
                 sheetName = args[i + 1].toString();
         } else if (iequalsTableOpt(k, "VariableNamingRule")) {
             preserveNames = iequalsTableOpt(args[i + 1].toString(), "preserve");
+        } else if (iequalsTableOpt(k, "ReadVariableNames")) {
+            readVarNamesMode = args[i + 1].toBool() ? 1 : 0;
         } else if (iequalsTableOpt(k, "TreatAsMissing")) {
             treatAsMissing = TablePayload::extractNames(args[i + 1], "readtable", "TreatAsMissing", alloc);
         }
@@ -559,13 +630,35 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
     }
     const keel::usize maxR = grid.size();
     const keel::usize maxC = grid[0].size();
-    const keel::usize nrows = (maxR > 1) ? (maxR - 1) : 0;
+    bool hasHeader = true;
+    if (readVarNamesMode == 0) {
+        hasHeader = false;
+    } else if (readVarNamesMode == -1) {
+        // Auto-detect headerless numeric tables: if every present cell in row 0
+        // is an unquoted numeric token, treat row 0 as data (Var1..VarN).
+        keel::usize presentCount = 0, numHeaderCount = 0;
+        for (keel::usize c = 0; c < maxC; ++c) {
+            const auto &cell = grid[0][c];
+            if (!cell.present || cell.text.empty()) continue;
+            ++presentCount;
+            keel::f64 dummy = 0.0;
+            if (!cell.isStr && tryParseCellDouble(cell.text, dummy))
+                ++numHeaderCount;
+        }
+        if (presentCount > 0 && numHeaderCount == presentCount)
+            hasHeader = false;
+    }
+    const keel::usize dataStart = hasHeader ? 1 : 0;
+    const keel::usize nrows = (maxR > dataStart) ? (maxR - dataStart) : 0;
     p->nrows = nrows;
 
     for (keel::usize c = 0; c < maxC; ++c) {
-        keel::String nm = grid[0][c].text.clone(alloc);
-        if (!preserveNames && !nm.empty())
-            nm = makeValidIdStr(nm.as_ref());
+        keel::String nm(alloc);
+        if (hasHeader) {
+            nm = grid[0][c].text.clone(alloc);
+            if (!preserveNames && !nm.empty())
+                nm = makeValidIdStr(nm.as_ref());
+        }
         if (nm.empty())
             nm = keel::format_alloc(alloc, "Var{}", c + 1);
         keel::String base = nm.clone(alloc);
@@ -576,7 +669,7 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
         p->varNames.push_back(keel::move(nm));
 
         keel::usize numCount = 0, strCount = 0;
-        for (keel::usize r = 1; r < maxR; ++r) {
+        for (keel::usize r = dataStart; r < maxR; ++r) {
             const auto &cell = grid[r][c];
             if (!cell.present || cell.text.empty() || isMissingToken(cell.text))
                 continue;
@@ -592,18 +685,18 @@ void readtable_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Va
             Value col = Value::matrix(nrows, 1, ValueType::DOUBLE, mr);
             keel::f64 *dst = col.doubleDataMut();
             const keel::f64 nan = keel::Limits<keel::f64>::quiet_nan();
-            for (keel::usize r = 1; r < maxR; ++r) {
+            for (keel::usize r = dataStart; r < maxR; ++r) {
                 const auto &cell = grid[r][c];
                 keel::f64 d = nan;
                 if (cell.present && !cell.isStr && !cell.text.empty() && !isMissingToken(cell.text))
                     tryParseCellDouble(cell.text, d);
-                dst[r - 1] = d;
+                dst[r - dataStart] = d;
             }
             p->cols.push_back(keel::move(col));
         } else {
             Value col = Value::cell(nrows, 1, mr);
-            for (keel::usize r = 1; r < maxR; ++r)
-                col.cellAt(r - 1) = Value::fromString(grid[r][c].text, mr);
+            for (keel::usize r = dataStart; r < maxR; ++r)
+                col.cellAt(r - dataStart) = Value::fromString(grid[r][c].text, mr);
             p->cols.push_back(keel::move(col));
         }
     }

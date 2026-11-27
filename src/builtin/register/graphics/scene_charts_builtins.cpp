@@ -710,6 +710,10 @@ void surfaceCore(keel::ArrayRef<Value> args, keel::usize nargout,
         zd = ensure2DDouble(*nums[2], mr);
         cd = (nums.size() >= 4) ? ensure2DDouble(*nums[3], mr) : zd;
     }
+    if (isPcolor && !zd.isEmpty()) {
+        cd = zd;
+        zd = Value::matrix(zd.dims().rows(), zd.dims().cols(), ValueType::DOUBLE, mr);
+    }
 
     const NodeId sid = scene.createChartNode(ClassId::Surface, axId, false);
     if (GraphicsNode *sn = scene.findNode(sid)) {

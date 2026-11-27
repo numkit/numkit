@@ -382,8 +382,65 @@ void material_scene_reg(keel::ArrayRef<Value> args, keel::usize,
 void surfl_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                      keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    forwardExternal(ctx, "surf", args, nargout, outs);
-    Value lt[1] = {Value::fromString("gouraud", ctx.engine->allocator())};
+    auto *mr = ctx.engine->allocator();
+    keel::Array<Value> surfArgs(mr);
+    surfArgs.reserve(args.size());
+
+    keel::usize idx = 0;
+    if (!args.empty() && isSceneGraphicsHandle(args[0])) {
+        surfArgs.push_back(args[0]);
+        idx = 1;
+    }
+
+    // Collect leading positional numeric arguments before any char/string options.
+    keel::usize numStart = idx;
+    while (idx < args.size() && args[idx].isNumeric())
+        ++idx;
+    const keel::usize numCount = idx - numStart;
+
+    auto isSmallVec = [](const Value &v, keel::usize lo, keel::usize hi) -> bool {
+        const keel::usize n = v.numel();
+        return n >= lo && n <= hi && (v.dims().rows() == 1 || v.dims().cols() == 1);
+    };
+
+    // Keep only the surface coordinate/data arguments (Z, or X,Y,Z), stripping
+    // optional lighting direction vector s ([az el] or [sx sy sz]) and
+    // reflectance vector k ([ka kd ks spread]).
+    keel::usize keepNum = numCount;
+    if (numCount == 2) {
+        const Value &z = args[numStart];
+        const Value &a1 = args[numStart + 1];
+        if (isSmallVec(a1, 2, 3) && (a1.dims().rows() != z.dims().rows() || a1.dims().cols() != z.dims().cols()))
+            keepNum = 1;
+    } else if (numCount == 3) {
+        const Value &z = args[numStart];
+        const Value &a1 = args[numStart + 1];
+        const Value &a2 = args[numStart + 2];
+        if (z.dims().rows() > 1 && z.dims().cols() > 1 && isSmallVec(a1, 2, 3) && isSmallVec(a2, 4, 4))
+            keepNum = 1;
+    } else if (numCount == 4) {
+        const Value &z = args[numStart + 2];
+        const Value &a3 = args[numStart + 3];
+        if (isSmallVec(a3, 2, 3) && (a3.dims().rows() != z.dims().rows() || a3.dims().cols() != z.dims().cols()))
+            keepNum = 3;
+    } else if (numCount >= 5) {
+        keepNum = 3;
+    }
+
+    for (keel::usize k = 0; k < keepNum; ++k)
+        surfArgs.push_back(args[numStart + k]);
+
+    // Consume optional lighting method token ('cdata' or 'light').
+    if (idx < args.size() && (args[idx].isChar() || args[idx].isString())) {
+        const keel::String tok = args[idx].toString();
+        if (asciiEqualNoCase(tok, "light") || asciiEqualNoCase(tok, "cdata"))
+            ++idx;
+    }
+    for (; idx < args.size(); ++idx)
+        surfArgs.push_back(args[idx]);
+
+    forwardExternal(ctx, "surf", surfArgs.as_ref(), nargout, outs);
+    Value lt[1] = {Value::fromString("gouraud", mr)};
     Value dummy[1];
     lighting_scene_reg(keel::ArrayRef<Value>(lt, 1), 0, keel::MutArrayRef<Value>(dummy, 1), ctx);
 }
