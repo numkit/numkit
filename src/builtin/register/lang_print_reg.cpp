@@ -43,8 +43,10 @@ void fprintf_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutArray
                  CallContext &ctx)
 {
     argcheck::checkNargin(args.size(), 1, "fprintf");
+    const bool toFile = (args.size() >= 2 && args[0].isNumeric() && args[0].numel() == 1
+                         && args[0].toScalar() >= 3.0);
     keel::usize count = ::numkit::runtime::fprintf(coreEngine(ctx), args);
-    if (nargout >= 1 && !outs.empty())
+    if ((nargout >= 1 || toFile) && !outs.empty())
         outs[0] = Value::scalar(keel::as<keel::f64>(count), ctx.engine->allocator());
 }
 

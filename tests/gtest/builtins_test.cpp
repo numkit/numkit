@@ -3751,4 +3751,20 @@ TEST_P(DisplayTest, ConstantIndexElemAsDoubleHardening)
     EXPECT_THROW(eval("randn('state', {'a', 'b'});"), numkit::Error);
 }
 
+TEST_P(DisplayTest, FprintfFileSetsAnsStdoutDoesNot)
+{
+    eval("tmpf = [tempname '.txt']; "
+         "clear ans; "
+         "fid = fopen(tmpf, 'w'); "
+         "fprintf(fid, 'hello\\n'); "
+         "aFile = ans; "
+         "fclose(fid); "
+         "delete(tmpf); "
+         "clear ans; "
+         "fprintf('stdout_only\\n'); "
+         "hasStdoutAns = exist('ans', 'var');");
+    EXPECT_DOUBLE_EQ(evalScalar("aFile"), 6.0);
+    EXPECT_DOUBLE_EQ(evalScalar("hasStdoutAns"), 0.0);
+}
+
 INSTANTIATE_DUAL(DisplayTest);
