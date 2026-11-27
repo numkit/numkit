@@ -110,10 +110,6 @@ public:
         return engine_.resolvePath(userPath);
     }
 
-    FigureManager &figureManager() override {
-        return engine_.figureManager();
-    }
-
     void registerBuiltinMSource(keel::StringRef src) override {
         engine_.registerBuiltinMSource(src);
     }

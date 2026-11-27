@@ -21,7 +21,7 @@
 
 #include "core/engine/callback_builtin.hpp"
 #include <numkit/core/engine.hpp>
-#include <numkit/graphics/figure_manager.hpp>
+#include <numkit/graphics/graphics_scene.hpp>
 #include <numkit/core/environment.hpp>
 #include <numkit/core/plugin_loader.hpp>
 #include <numkit/sys/vfs.hpp>          // FileStat (exist / who -file / whos -file)
@@ -158,7 +158,7 @@ void clear_reg(keel::ArrayRef<Value> args, keel::usize,
             coreEngine(ctx).clearUserFunctions();
             coreEngine(ctx).clearClassDefs();
             coreEngine(ctx).reinstallBuiltinSources();
-            ctx.engine->figureManager().closeAll();
+            coreEngine(ctx).graphicsScene().closeAllFigures(true, true);
             coreEngine(ctx).reinstallConstants();
             coreEngine(ctx).markClearAll();
             coreEngine(ctx).syncEnvRemovalsToFrame(env);

@@ -24,7 +24,6 @@ namespace numkit {
 class TreeWalker;
 class VM;
 class Compiler;
-class FigureManager;
 namespace gfx { class GraphicsScene; }
 class DebugFacade;       // grouped debugger handle (engine.debug()); defined below
 struct FunctionRegistryState; // encapsulated function/namespace/persistent state; engine_internal.hpp
@@ -488,9 +487,6 @@ public:
     keel::Array<keel::String> workspaceVarNames() const;
     void outputText(keel::StringRef s);
 
-    FigureManager &figureManager() override { return *figureManager_; }
-    const FigureManager &figureManager() const { return *figureManager_; }
-
     PluginLoader &pluginLoader();
     const PluginLoader &pluginLoader() const;
 
@@ -923,7 +919,6 @@ private:
 
     OutputFunc outputFunc_;
     InputProvider inputProvider_;   // empty → input() reads stdin
-    keel::UniquePtr<FigureManager> figureManager_;
     keel::UniquePtr<gfx::GraphicsScene> graphicsScene_;
     keel::UniquePtr<PluginLoader> pluginLoader_;
 

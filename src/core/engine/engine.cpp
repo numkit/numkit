@@ -17,7 +17,6 @@
 #include <keel/math.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/graphics/graphics_scene.hpp>
 #include "core/engine/caching_allocator.hpp"
 #include "core/compiler/compiler.hpp"
@@ -53,8 +52,6 @@ Engine::Engine(keel::Allocator *mr)
     globalsEnv_ = keel::make_arc<Environment>();
     constantsEnv_ = keel::make_unique<Environment>(nullptr, globalsEnv_.get());
     workspaceEnv_ = keel::make_unique<Environment>(constantsEnv_.get(), globalsEnv_.get());
-    figureManager_ = keel::make_unique<FigureManager>();
-    figureManager_->setOutputFunc([this](keel::StringRef s) { this->outputText(s); });
     graphicsScene_ = keel::make_unique<gfx::GraphicsScene>(mr_);
     treeWalker_ = keel::make_unique<TreeWalker>(*this);
     compiler_ = keel::make_unique<Compiler>(*this);
@@ -119,7 +116,6 @@ Engine::~Engine()
     funcReg_.reset();
     pluginLoader_.reset();
     graphicsScene_.reset();
-    figureManager_.reset();
 }
 
 void Engine::setNamespaceMode(NamespaceMode mode) noexcept

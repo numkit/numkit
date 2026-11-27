@@ -432,8 +432,13 @@ void Engine::objectStoreSlice(Value &dst, keel::ArrayRef<keel::Array<keel::usize
             coercedVal = cls->construct(keel::ArrayRef<Value>(argBuf, 1), ctx);
         }
     }
-    Value fill; // default element for grown gaps (class no-arg constructor)
-    if (cls && cls->construct) {
+    Value fill; // default element for grown gaps
+    if (cls && cls->heterogeneousGroup == "graphics") {
+        if (const BuiltinClass *ph = findClass("matlab.graphics.GraphicsPlaceholder"); ph && ph->construct) {
+            CallContext ctx{this, env};
+            fill = ph->construct(keel::ArrayRef<Value>(nullptr, 0), ctx);
+        }
+    } else if (cls && cls->construct) {
         CallContext ctx{this, env};
         fill = cls->construct(keel::ArrayRef<Value>(nullptr, 0), ctx);
     }

@@ -20,7 +20,6 @@
 #include <keel/string.h>
 
 #include <numkit/core/engine.hpp>
-#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 #include <numkit/graphics/graphics_scene.hpp>
 #include <numkit/graphics/property_schema.hpp>
@@ -321,8 +320,6 @@ void registerOneSceneClass(Engine &engine, ClassId cid)
         if (cid == ClassId::Figure) {
             const NodeId fid = scene.createFigure();
             applyNameValuePairs(scene, fid, args, 0, mr);
-            if (const GraphicsNode *fn = scene.findNode(fid); fn && fn->figureNumber > 0)
-                ctx.engine->figureManager().setFigure(fn->figureNumber);
             return scene.makeHandleValue(fid, mr);
         }
         if (cid == ClassId::Axes) {
@@ -361,11 +358,6 @@ void registerOneSceneClass(Engine &engine, ClassId cid)
             return scene.makeHandleValue(clId, mr);
         }
         if (GraphicsScene::isChartClass(cid) || cid == ClassId::TextBox) {
-            // Zero-arg default construction (e.g. during object-array preallocation/growth
-            // such as `h = zeros(1,5); h(1) = patch(...)`) must yield a GraphicsPlaceholder
-            // without spawning ghost live nodes in the current Axes.
-            if (args.empty())
-                return scene.makeEmptyPlaceholder(mr);
             const NodeId id = scene.createChartNode(cid, kInvalidNodeId, cid != ClassId::TextBox);
             if (cid == ClassId::Line) {
                 Value def = Value::matrix(1, 2, ValueType::DOUBLE, mr);
@@ -392,7 +384,6 @@ void figure_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                       keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     NodeId fid = kInvalidNodeId;
@@ -425,9 +416,6 @@ void figure_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
     if (nvStart < args.size())
         applyNameValuePairs(scene, fid, args, nvStart, mr);
 
-    if (const GraphicsNode *fn = scene.findNode(fid); fn && fn->figureNumber > 0)
-        fm.setFigure(fn->figureNumber);
-
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(fid, mr) : Value();
 }
 
@@ -438,8 +426,6 @@ void gcf_scene_reg(keel::ArrayRef<Value> args, keel::usize,
     auto &scene = coreEngine(ctx).graphicsScene();
     auto *mr = ctx.engine->allocator();
     const NodeId fid = scene.ensureCurrentFigure();
-    if (const GraphicsNode *fn = scene.findNode(fid); fn && fn->figureNumber > 0)
-        ctx.engine->figureManager().setFigure(fn->figureNumber);
     outs[0] = scene.makeHandleValue(fid, mr);
 }
 
@@ -487,7 +473,6 @@ void clf_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     NodeId targetFig = kInvalidNodeId;
@@ -510,19 +495,6 @@ void clf_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         targetFig = scene.ensureCurrentFigure();
 
     scene.clearFigure(targetFig, doReset);
-    if (const GraphicsNode *fn = scene.findNode(targetFig); fn && fn->figureNumber > 0) {
-        fm.invalidateHandles(fn->figureNumber, -1, true, false);
-        if (auto *fs = fm.figureOf(fn->figureNumber)) {
-            fs->superTitle.clear();
-            fs->axes.clear();
-            fs->axes.push_back(AxesState{});
-            fs->currentAxes = 0;
-            fs->subplotRows = 0;
-            fs->subplotCols = 0;
-            fs->modified = true;
-        }
-        fm.emitModified();
-    }
     outs[0] = (nargout >= 1) ? scene.makeHandleValue(targetFig, mr) : Value();
 }
 
@@ -530,18 +502,12 @@ void close_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                      keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
     auto &scene = coreEngine(ctx).graphicsScene();
-    auto &fm = ctx.engine->figureManager();
     auto *mr = ctx.engine->allocator();
 
     if (args.empty()) {
         const NodeId cur = scene.currentFigureId();
-        if (cur != kInvalidNodeId) {
-            if (const GraphicsNode *fn = scene.findNode(cur); fn && fn->figureNumber > 0)
-                fm.closeFigureNotify(fn->figureNumber);
+        if (cur != kInvalidNodeId)
             scene.closeFigure(cur, false);
-        } else {
-            fm.closeCurrentNotify();
-        }
         outs[0] = (nargout >= 1) ? Value::scalar(1.0, mr) : Value();
         return;
     }
@@ -558,19 +524,14 @@ void close_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                 if (asciiEqualNoCase(opt, "force"))  force = true;
             }
             scene.closeAllFigures(hidden, force);
-            fm.closeAllNotify();
             outs[0] = (nargout >= 1) ? Value::scalar(1.0, mr) : Value();
             return;
         }
-        // Close figure by Name.
         auto figs = scene.allChildren(kRootNodeId, mr);
         for (NodeId fid : figs) {
             const Value nv = scene.getProperty(fid, "Name", mr);
-            if (nv.toString() == tok) {
-                if (const GraphicsNode *fn = scene.findNode(fid); fn && fn->figureNumber > 0)
-                    fm.closeFigureNotify(fn->figureNumber);
+            if (nv.toString() == tok)
                 scene.closeFigure(fid, false);
-            }
         }
         outs[0] = (nargout >= 1) ? Value::scalar(1.0, mr) : Value();
         return;
@@ -580,24 +541,13 @@ void close_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         for (keel::usize k = 0; k < args[0].objectCount(); ++k) {
             keel::i32 id = -1;
             bool inSc = false;
-            if (!graphicsHandleAt(args[0], k, id, inSc))
+            if (!graphicsHandleAt(args[0], k, id, inSc) || !inSc || id == kPlaceholderNodeId)
                 continue;
-            if (inSc) {
-                if (id == kPlaceholderNodeId) continue;
-                const GraphicsNode *fn = scene.findNode(id);
-                if (!fn)
-                    throw Error("Invalid or deleted object.", 0, 0, "close", "", "numkit:graphics:InvalidHandle");
-                if (fn->classId == ClassId::Figure) {
-                    if (fn->figureNumber > 0)
-                        fm.closeFigureNotify(fn->figureNumber);
-                    scene.closeFigure(id, false);
-                }
-            } else if (auto *rec = fm.findHandle(id)) {
-                if (rec->type == "figure")
-                    fm.closeFigureNotify(rec->figureId);
-                else if (rec->type == "waitbar")
-                    rec->deleted = true;
-            }
+            const GraphicsNode *fn = scene.findNode(id);
+            if (!fn)
+                throw Error("Invalid or deleted object.", 0, 0, "close", "", "numkit:graphics:InvalidHandle");
+            if (fn->classId == ClassId::Figure)
+                scene.closeFigure(id, false);
         }
         outs[0] = (nargout >= 1) ? Value::scalar(1.0, mr) : Value();
         return;
@@ -609,7 +559,6 @@ void close_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
             const NodeId fid = scene.findFigureByNumber(num);
             if (fid != kInvalidNodeId)
                 scene.closeFigure(fid, false);
-            fm.closeFigureNotify(num);
         }
     }
     outs[0] = (nargout >= 1) ? Value::scalar(1.0, mr) : Value();
@@ -1002,15 +951,10 @@ bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
                     roots.push_back(id);
             }
             idx = 1;
-        } else if (graphicsHandleIdOf(args[0]) >= 0) {
-            // Legacy FigureManager handle — let legacy findobj handle it.
-            return false;
         }
     }
-    if (roots.empty()) {
-        // Default root scope: only claim if caller didn't pass legacy-only chart type.
+    if (roots.empty())
         roots.push_back(kRootNodeId);
-    }
 
     // Parse options (-depth, -flat, -not, -and, -or, -xor, -property, -isa, -class, -regexp, Prop/Val).
     enum class TermKind : keel::u8 { PropEq, PropRegexp, HasProp, IsClass };
@@ -1082,12 +1026,6 @@ bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
             continue;
         }
         if (idx + 1 < args.size()) {
-            // All Phase 1-3 object types live in GraphicsScene now; only defer unknown legacy types.
-            if (asciiEqualNoCase(tok, "Type") && (args[idx + 1].isChar() || args[idx + 1].isString())) {
-                const keel::String wantT = args[idx + 1].toString();
-                if (schemaByTypeName(wantT) == nullptr && !asciiEqualNoCase(wantT, "theme"))
-                    return false;
-            }
             Term t;
             t.kind = TermKind::PropEq;
             t.name = tok.clone(mr);
@@ -1150,19 +1088,13 @@ bool trySceneFind(keel::ArrayRef<Value> args, bool includeHidden,
             hits.push_back(nid);
     }
 
-    // If no hits and there are legacy FigureManager handles while caller searched without explicit scene root,
-    // allow fallback only when no explicit scene handle was passed.
-    if (hits.empty() && (args.empty() || !isSceneGraphicsHandle(args[0]))
-        && !ctx.engine->figureManager().handles().empty()) {
-        return false;
-    }
-
     outs[0] = scene.makeHandleColumn(hits.as_ref(), mr);
     return true;
 }
 
 void registerSceneAxesBuiltins(Engine &engine);
 void registerSceneChartsBuiltins(Engine &engine);
+void registerSceneExtraBuiltins(Engine &engine);
 
 void registerSceneGraphics(Engine &engine)
 {
@@ -1223,6 +1155,7 @@ void registerSceneGraphics(Engine &engine)
 
     registerSceneAxesBuiltins(engine);
     registerSceneChartsBuiltins(engine);
+    registerSceneExtraBuiltins(engine);
 }
 
 } // namespace numkit::gfx::detail

@@ -29,7 +29,7 @@
 #include <keel/string.h>
 #include <keel/utf8.h>
 #include <numkit/graphics/figure_render.hpp>
-#include <numkit/graphics/figure_manager.hpp>
+#include <numkit/graphics/figure_render_state.hpp>
 
 #include <keel/format.h>
 #include <keel/number.h>

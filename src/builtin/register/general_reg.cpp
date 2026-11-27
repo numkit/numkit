@@ -8,7 +8,6 @@
 #include <keel/utf8.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
-#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/core/types.hpp>
 #include <numkit/value/value.hpp>
 #include <numkit/value/argcheck.hpp>
@@ -397,9 +396,7 @@ void rmdir_impl_reg(keel::ArrayRef<Value> args, keel::usize nargout, keel::MutAr
 void delete_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<Value> outs,
                      CallContext &ctx)
 {
-    auto &fm = ctx.engine->figureManager();
     auto &scene = coreEngine(ctx).graphicsScene();
-    bool anyFigureClosed = false;
     for (const auto &a : args) {
         if (a.isObject() && a.objectCount() > 0) {
             bool anyHandled = false;
@@ -409,30 +406,8 @@ void delete_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
                 if (!graphicsHandleAt(a, k, hid, inScene))
                     continue;
                 anyHandled = true;
-                if (inScene) {
-                    if (hid == gfx::kPlaceholderNodeId)
-                        continue;
-                    if (const auto *fn = scene.findNode(hid); fn && fn->classId == gfx::ClassId::Figure && fn->figureNumber > 0) {
-                        fm.closeFigureNotify(fn->figureNumber);
-                        anyFigureClosed = true;
-                    }
+                if (inScene && hid != gfx::kPlaceholderNodeId)
                     scene.deleteNode(hid, /*force=*/true);
-                    continue;
-                }
-                if (hid >= 0) {
-                    auto *rec = fm.findHandle(hid);
-                    if (!rec)
-                        continue;
-                    if (rec->type == "figure") {
-                        fm.closeFigureNotify(rec->figureId);
-                        anyFigureClosed = true;
-                    } else if (rec->type == "axes") {
-                        fm.removeAxes(rec->figureId, rec->axesIndex);
-                        fm.markFigureModified(rec->figureId);
-                    } else {
-                        fm.deleteHandle(hid);
-                    }
-                }
             }
             if (anyHandled)
                 continue;
@@ -447,8 +422,6 @@ void delete_impl_reg(keel::ArrayRef<Value> args, keel::usize, keel::MutArrayRef<
             throw numkit::Error(keel::format("delete: cannot resolve '{}'", p).c_str());
         rp.fs->unlink(rp.path);
     }
-    if (!anyFigureClosed)
-        fm.emitModified();
     outs[0] = Value();
 }
 
@@ -757,14 +730,10 @@ void profile_reg(keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<V
 void lsline_reg(keel::ArrayRef<Value>, keel::usize nargout, keel::MutArrayRef<Value> outs,
                 CallContext &ctx)
 {
-    if (nargout >= 1) {
-        const keel::i32 hid = ctx.engine->figureManager().createHandle(
-            "line", "matlab.graphics.chart.primitive.Line");
-        outs[0] = makeGraphicsHandleValue(
-            "matlab.graphics.chart.primitive.Line", hid, ctx.engine->allocator());
-    } else {
-        outs[0] = Value();
-    }
+    auto &scene = coreEngine(ctx).graphicsScene();
+    const gfx::NodeId axId = scene.ensureCurrentAxes();
+    const gfx::NodeId lid = scene.createChartNode(gfx::ClassId::Line, axId, true);
+    outs[0] = (nargout >= 1) ? scene.makeHandleValue(lid, ctx.engine->allocator()) : Value();
 }
 
 struct GeneralRegEntry {

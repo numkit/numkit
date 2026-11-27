@@ -956,4 +956,56 @@ TEST_P(GraphicsSceneTest, PartA200ScriptParityBuiltins)
     EXPECT_DOUBLE_EQ(evalScalar("n15"), 3.0);
 }
 
+TEST_P(GraphicsSceneTest, Phase5DebloatExtraBuiltins)
+{
+    eval("close all force;"
+         "f1 = figure('Visible', 'off'); hc = cdfplot([3 1 4 1 5 9]);"
+         "f2 = figure('Visible', 'off'); hq = qqplot([1 2 3 4 5 6]);"
+         "f3 = figure('Visible', 'off'); hp = pareto([10 40 25 15]);"
+         "f4 = figure('Visible', 'off'); hh = histfit([1 2 2 3 3 3 4 5], 5);"
+         "f5 = figure('Visible', 'off'); spy(eye(4)); ydir5 = get(gca, 'YDir');"
+         "f6 = figure('Visible', 'off'); hv = violinplot([1 2 3 4 5; 2 3 4 5 6]');"
+         "f7 = figure('Visible', 'off'); hb3 = bar3([1 2; 3 4]);"
+         "f8 = figure('Visible', 'off'); hgs = geoscatter([10 20], [30 40]); geolimits([0 30], [20 50]); [glat, glon] = geolimits(); bm = geobasemap();"
+         "f9 = figure('Visible', 'off'); hsw = swarmchart([1 1 2 2], [3 4 5 6]);"
+         "f10 = figure('Visible', 'off'); hcm = confusionchart([5 1; 2 8], {'A', 'B'});"
+         "f11 = figure('Visible', 'off'); hfe = feather([1 2], [3 4]);"
+         "f12 = figure('Visible', 'off'); hez = ezplot(@(x)sin(x), [0 pi]);"
+         "f13 = figure('Visible', 'off'); hfs = fsurf(@(x,y)x.^2 + y.^2, [-1 1 -1 1]); lighting gouraud; material shiny;"
+         "f14 = figure('Visible', 'off'); htr = triplot([1 2 3], [0 1 0], [0 0 1]);"
+         "f15 = figure('Visible', 'off'); hvo = voronoi([0 1 0 1], [0 0 1 1]);"
+         "f16 = figure('Visible', 'off'); hpp = parallelplot([1 2 3; 4 5 6]);"
+         "[X3, Y3, Z3] = meshgrid(1:3, 1:3, 1:3); V3 = X3 + Y3 + Z3; fv = isosurface(X3, Y3, Z3, V3, 5.5);"
+         "f17 = figure('Visible', 'off'); plot(1:5); daspect([1 2 1]); da = daspect(); xtickangle(45); xa = xtickangle(); xtickformat('%.1f'); xf = xtickformat();"
+         "hw = waitbar(0.5, 'Working'); hu = uicontrol('String', 'OK'); drawnow;");
+
+    EXPECT_EQ(evalString("hc.Type"), "stair");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hq)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hp)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hh)"), 2.0);
+    EXPECT_EQ(evalString("ydir5"), "reverse");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hv)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hb3)"), 2.0);
+    EXPECT_EQ(evalString("hgs.Type"), "scatter");
+    EXPECT_DOUBLE_EQ(evalScalar("glat(2)"), 30.0);
+    EXPECT_DOUBLE_EQ(evalScalar("glon(2)"), 50.0);
+    EXPECT_EQ(evalString("bm"), "streets");
+    EXPECT_EQ(evalString("hsw.Type"), "scatter");
+    EXPECT_EQ(evalString("hcm.XLabel"), "Predicted Class");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hfe)"), 2.0);
+    EXPECT_EQ(evalString("hez.Type"), "line");
+    EXPECT_EQ(evalString("hfs.Type"), "surface");
+    EXPECT_EQ(evalString("hfs.FaceLighting"), "gouraud");
+    EXPECT_EQ(evalString("htr.Type"), "line");
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hvo)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("numel(hpp)"), 2.0);
+    EXPECT_GT(evalScalar("size(fv.vertices, 1)"), 0.0);
+    EXPECT_GT(evalScalar("size(fv.faces, 1)"), 0.0);
+    EXPECT_DOUBLE_EQ(evalScalar("da(2)"), 2.0);
+    EXPECT_DOUBLE_EQ(evalScalar("xa"), 45.0);
+    EXPECT_EQ(evalString("xf"), "%.1f");
+    EXPECT_EQ(evalString("hw.Type"), "figure");
+    EXPECT_EQ(evalString("hu.String"), "OK");
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

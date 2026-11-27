@@ -18,7 +18,6 @@
 #include <keel/memory.h>
 #include <numkit/core/standard_library.hpp>
 #include <numkit/core/engine.hpp>
-#include <numkit/graphics/figure_manager.hpp>
 
 
 namespace numkit {

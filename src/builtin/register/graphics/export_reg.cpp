@@ -23,7 +23,7 @@
 #include <numkit/core/engine.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/core/types.hpp>
-#include <numkit/graphics/figure_manager.hpp>
+#include <numkit/graphics/figure_render_state.hpp>
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/graphics/graphics_handle.hpp>
 #include <numkit/graphics/graphics_scene.hpp>
@@ -119,7 +119,6 @@ struct ExportArgs {
 bool resolveTargetFigure(Engine &engine, const Value &v, ExportArgs &out)
 {
     auto &scene = engine.graphicsScene();
-    auto &fm = engine.figureManager();
     if (isSceneGraphicsHandle(v)) {
         const keel::i32 hid = graphicsHandleIdOf(v);
         const auto *node = scene.findNode(hid);
@@ -134,14 +133,6 @@ bool resolveTargetFigure(Engine &engine, const Value &v, ExportArgs &out)
         }
         return false;
     }
-    const keel::i32 hid = graphicsHandleIdOf(v);
-    if (hid >= 0) {
-        auto *rec = fm.findHandle(hid);
-        if (!rec)
-            throw numkit::Error("Invalid or deleted object.");
-        out.fig = fm.figureOf(rec->figureId);
-        return out.fig != nullptr;
-    }
     if (v.isScalar()) {
         const keel::i32 num = keel::as<keel::i32>(v.toScalar());
         const gfx::NodeId figId = scene.findFigureByNumber(num);
@@ -150,8 +141,7 @@ bool resolveTargetFigure(Engine &engine, const Value &v, ExportArgs &out)
             out.useProjected = true;
             return true;
         }
-        out.fig = fm.figureOf(num);
-        return out.fig != nullptr;
+        return false;
     }
     return false;
 }
@@ -210,12 +200,10 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
         }
     }
     if (needTarget && !out.resolvedFigure()) {
-        const gfx::NodeId curFig = engine.graphicsScene().currentFigureId();
+        const gfx::NodeId curFig = engine.graphicsScene().ensureCurrentFigure();
         if (curFig != gfx::kInvalidNodeId
             && gfx::projectSceneFigureToRenderState(engine.graphicsScene(), curFig, out.projectedFig, engine.allocator())) {
             out.useProjected = true;
-        } else {
-            out.fig = &engine.figureManager().current();
         }
     }
     if (!havePath)
@@ -336,14 +324,17 @@ void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
         resolveTargetFigure(eng, args[0], ea);
     const FigureState *fig = ea.resolvedFigure();
     if (!fig) {
-        const gfx::NodeId curFig = eng.graphicsScene().currentFigureId();
+        const gfx::NodeId curFig = eng.graphicsScene().ensureCurrentFigure();
         if (curFig != gfx::kInvalidNodeId
             && gfx::projectSceneFigureToRenderState(eng.graphicsScene(), curFig, ea.projectedFig, mr)) {
             ea.useProjected = true;
             fig = ea.resolvedFigure();
         }
     }
-    if (!fig) fig = &ctx.engine->figureManager().current();
+    if (!fig) {
+        ea.useProjected = true;
+        fig = ea.resolvedFigure();
+    }
     const keel::i32 W = 560, H = 420;
     keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
     const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
@@ -391,7 +382,7 @@ void im2frame_reg(keel::ArrayRef<Value> args, keel::usize,
 void chartNoop_reg(keel::ArrayRef<Value>, keel::usize nargout,
                    keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    ctx.engine->figureManager().current();
+    coreEngine(ctx).graphicsScene().ensureCurrentFigure();
     if (!outs.empty())
         outs[0] = (nargout >= 1) ? Value::scalar(1.0, ctx.engine->allocator()) : Value();
 }
@@ -399,7 +390,7 @@ void chartNoop_reg(keel::ArrayRef<Value>, keel::usize nargout,
 void dendrogram_reg(keel::ArrayRef<Value> args, keel::usize nargout,
                     keel::MutArrayRef<Value> outs, CallContext &ctx)
 {
-    ctx.engine->figureManager().current();
+    coreEngine(ctx).graphicsScene().ensureCurrentAxes();
     auto *mr = ctx.engine->allocator();
     keel::usize m = (!args.empty() && args[0].dims().rows() > 0) ? args[0].dims().rows() : 1;
     if (nargout == 0) {
@@ -708,8 +699,6 @@ constexpr ExportRegEntry kExportFns[] = {
     {"exportgraphics", &exportgraphics_reg},
     {"print",          &print_reg},
     {"shading",        &graphicsNoop_reg},
-    {"lighting",       &graphicsNoop_reg},
-    {"material",       &graphicsNoop_reg},
     {"movie",          &graphicsNoop_reg},
     {"getframe",       &getframe_reg},
     {"frame2im",       &frame2im_reg},

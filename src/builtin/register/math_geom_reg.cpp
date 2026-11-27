@@ -9,7 +9,6 @@
 #include <keel/string.h>
 #include <numkit/core/engine.hpp>
 #include <numkit/value/argcheck.hpp>
-#include <numkit/graphics/figure_manager.hpp>
 #include <numkit/builtin/polyfun.hpp>
 #include <numkit/value/error.hpp>
 #include <numkit/value/value.hpp>
@@ -130,29 +129,23 @@ void convhull_reg(keel::ArrayRef<Value> args, keel::usize nargout,
         outs[0] = keel::move(K);
         return;
     }
-    // Auto-plot the hull polygon when called with no LHS (MATLAB
-    // convention). Reconstruct hull coordinates from the index vector K.
-    auto &fm = ctx.engine->figureManager();
-    fm.prepareForPlot();
+    // Auto-plot the hull polygon when called with no LHS.
+    auto *mr = ctx.engine->allocator();
     const keel::f64 *k = K.doubleData();
     const keel::usize m = K.numel();
-    keel::String xs(ctx.engine->allocator());
-    keel::String ys(ctx.engine->allocator());
-    xs.push_back('['); ys.push_back('[');
+    Value hx = Value::matrix(1, m, ValueType::DOUBLE, mr);
+    Value hy = Value::matrix(1, m, ValueType::DOUBLE, mr);
     for (keel::usize i = 0; i < m; ++i) {
-        if (i) { xs.push_back(','); ys.push_back(','); }
         const keel::usize kk = keel::as<keel::usize>(k[i]) - 1;
-        figdetail::appendDouble(xs, args[0].elemAsDouble(kk));
-        figdetail::appendDouble(ys, args[1].elemAsDouble(kk));
+        hx.doubleDataMut()[i] = args[0].elemAsDouble(kk);
+        hy.doubleDataMut()[i] = args[1].elemAsDouble(kk);
     }
-    xs.push_back(']'); ys.push_back(']');
-    DatasetInfo ds;
-    ds.type.assign("line");
-    ds.xJson = keel::move(xs);
-    ds.yJson = keel::move(ys);
-    ds.style.assign("color=#1f77b4");
-    fm.pushDataset(keel::move(ds));
-    fm.emitModified();
+    if (const ExternalFunc *pf = ctx.engine->findExternal("plot", ctx.env)) {
+        Value pArgs[2] = {keel::move(hx), keel::move(hy)};
+        Value pOut[1];
+        (*pf)(keel::ArrayRef<Value>(pArgs, 2), 0, keel::MutArrayRef<Value>(pOut, 1), ctx);
+    }
+    outs[0] = Value();
 }
 
 // ── histcounts2 ──────────────────────────────────────────────────────

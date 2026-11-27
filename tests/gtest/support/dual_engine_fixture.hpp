@@ -96,9 +96,6 @@ public:
 
     keel::usize rows(const Value &v) { return v.dims().rows(); }
     keel::usize cols(const Value &v) { return v.dims().cols(); }
-
-    FigureManager &fm() { return engine.figureManager(); }
-    AxesState &ax() { return fm().currentAxes(); }
 };
 
 } // namespace m_test

@@ -573,7 +573,6 @@ TEST_P(CommandGlueTest, ExistFileInsideFunction)
         tmpDir.as_ref(),
         keel::format("numkit_kb_ex_{}_{}.txt", static_cast<int>(GetParam()), ++tmpCounter).as_ref());
     const std::string tmp(tmpPath.data(), tmpPath.size());
-    engine.figureManager();   // no-op; keep engine warm
     eval("fid = fopen('" + tmp + "', 'w'); fwrite(fid, uint8('x')); fclose(fid);");
     eval("eIn = q('" + tmp + "');");
     eval("eTop = exist('" + tmp + "', 'file');");

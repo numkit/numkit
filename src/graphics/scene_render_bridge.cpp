@@ -15,7 +15,7 @@
 #include <keel/ref.h>
 #include <keel/string.h>
 
-#include <numkit/graphics/figure_manager.hpp>
+#include <numkit/graphics/figure_render_state.hpp>
 #include <numkit/graphics/graphics_scene.hpp>
 
 namespace numkit::gfx {
