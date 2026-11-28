@@ -42,6 +42,7 @@ struct DatasetInfo
     keel::f64 lineWidth = 0.0;
     keel::f64 markerSize = 0.0;
     bool visible = true;
+    bool handleVisible = true;
     keel::String yside;
 
     keel::String eJson;
@@ -168,6 +169,12 @@ struct AxesState
     keel::i32 subplotRows = 0;
     keel::i32 subplotCols = 0;
 
+    bool hasPosition = false;
+    keel::f64 posLeft = 0.0;
+    keel::f64 posBottom = 0.0;
+    keel::f64 posWidth = 0.0;
+    keel::f64 posHeight = 0.0;
+
     AxesState clone(keel::Allocator *alloc = nullptr) const;
 };
 
@@ -177,6 +184,9 @@ struct FigureState
     bool modified = false;
     keel::i32 subplotRows = 0;
     keel::i32 subplotCols = 0;
+    keel::f64 figWidth = 0.0;
+    keel::f64 figHeight = 0.0;
+    keel::String bgColorHex;
 
     keel::Array<AxesState> axes;
     keel::i32 currentAxes = 0;

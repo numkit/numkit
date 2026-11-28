@@ -1096,4 +1096,52 @@ TEST_P(GraphicsSceneTest, FieldtestParityFixesColorSurflPrintRgbDatacursorAndTab
     EXPECT_DOUBLE_EQ(evalScalar("n_all_line"), 1.0);
 }
 
+TEST_P(GraphicsSceneTest, SpanningSubplotMarkersTexLegendAndPngExport)
+{
+    const char *tag = (engine.backend() == numkit::Engine::Backend::VM) ? "vm" : "tw";
+    std::string svgFile = std::string("numkit_span_export_") + tag + ".svg";
+    std::string pngFile = std::string("numkit_span_export_") + tag + ".png";
+    std::string code =
+        "close all force;"
+        "f = figure('Visible', 'off', 'Color', 'w', 'Position', [0, 0, 800, 500]);"
+        "subplot(2, 2, 1); hold on; grid on;"
+        "plot([0 1 2], [0 1 0], 'DisplayName', 'CurveA');"
+        "plot(1, 1, 'o', 'HandleVisibility', 'off');"
+        "xlabel('Lag \\tau, ms'); title('TopLeft 65^\\circ');"
+        "legend('Location', 'northeast');"
+        "subplot(2, 2, 2); hold on; axis equal off;"
+        "plot([0 1], [0 1], '--', 'DisplayName', 'Dashed');"
+        "title('TopRight');"
+        "legend('Location', 'southwest');"
+        "subplot(2, 2, [3, 4]); hold on; grid on;"
+        "plot([0 180 360], [-10 0 -10], 'DisplayName', 'Spec');"
+        "plot(65, 0, 'ko', 'MarkerFaceColor', [0 0.45 0.74], 'MarkerSize', 7, 'DisplayName', 'Peak');"
+        "xlim([0 360]); ylim([-35 2]); set(gca, 'XTick', 0:60:360);"
+        "xlabel('Azimuth \\theta, deg'); title('SpanBottom');"
+        "legend('Location', 'northeast');"
+        "exportgraphics(f, '" + svgFile + "');"
+        "exportgraphics(f, '" + pngFile + "', 'Resolution', 100);"
+        "svgTxt = fileread('" + svgFile + "');"
+        "pngImg = imread('" + pngFile + "');"
+        "delete('" + svgFile + "'); delete('" + pngFile + "');";
+    eval(code);
+    ASSERT_NE(getVarPtr("svgTxt"), nullptr);
+    const keel::String svg = getVarPtr("svgTxt")->toString();
+    // All 3 subplots (including spanning [3,4]) rendered.
+    EXPECT_NE(svg.find("TopLeft 65\xC2\xB0"), keel::kInvalidIndex);
+    EXPECT_NE(svg.find("TopRight"), keel::kInvalidIndex);
+    EXPECT_NE(svg.find("SpanBottom"), keel::kInvalidIndex);
+    // TeX-to-UTF-8 decoded Greek symbols.
+    EXPECT_NE(svg.find("Lag \xCF\x84, ms"), keel::kInvalidIndex);
+    EXPECT_NE(svg.find("Azimuth \xCE\xB8, deg"), keel::kInvalidIndex);
+    // MarkerFaceColor rendered as filled circle (#0073bd) and legend labels present.
+    EXPECT_NE(svg.find("fill=\"#0073bd\""), keel::kInvalidIndex);
+    EXPECT_NE(svg.find("CurveA"), keel::kInvalidIndex);
+    EXPECT_NE(svg.find("Peak"), keel::kInvalidIndex);
+    // PNG exported with canvas matching Figure.Position (800x500 at 100 dpi).
+    ASSERT_NE(getVarPtr("pngImg"), nullptr);
+    EXPECT_EQ(getVarPtr("pngImg")->dims().rows(), 500u);
+    EXPECT_EQ(getVarPtr("pngImg")->dims().cols(), 800u);
+}
+
 INSTANTIATE_DUAL(GraphicsSceneTest);

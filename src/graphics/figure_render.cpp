@@ -22,22 +22,272 @@
 #include <keel/array.h>
 #include <keel/algo.h>
 #include <keel/core.h>
+#include <keel/font.h>
 #include <keel/format.h>
+#include <keel/fs.h>
 #include <keel/math.h>
 #include <keel/number.h>
 #include <keel/ref.h>
+#include <keel/static_array.h>
 #include <keel/string.h>
+#include <keel/sync.h>
 #include <keel/utf8.h>
 #include <numkit/graphics/figure_render.hpp>
 #include <numkit/graphics/figure_render_state.hpp>
 
-#include <keel/format.h>
-#include <keel/number.h>
-#include <keel/static_array.h>
 #include <initializer_list>
 
 namespace numkit {
 namespace figrender {
+
+// ── TrueType font cache (via keel::font) + TeX-to-UTF-8 decoder ──────
+namespace {
+
+struct PlotFontCache {
+    keel::Mutex mu;
+    bool initialized = false;
+    keel::Array<keel::u8> regBytes;
+    keel::Array<keel::u8> boldBytes;
+    keel::font::FontFace regFace;
+    keel::font::FontFace boldFace;
+
+    void ensureLoaded()
+    {
+        keel::LockGuard lock(mu);
+        if (initialized)
+            return;
+        initialized = true;
+
+        struct FontPair {
+            const char *regPath;
+            const char *boldPath;
+        };
+        static const FontPair kCandidates[] = {
+            {"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"},
+            {"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+             "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"},
+            {"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+             "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"},
+            {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"},
+            {"/usr/share/fonts/TTF/DejaVuSans.ttf",
+             "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"},
+            {"/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+             "/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf"},
+            {"/System/Library/Fonts/Supplemental/Arial.ttf",
+             "/System/Library/Fonts/Supplemental/Arial Bold.ttf"},
+            {"/Library/Fonts/Arial.ttf",
+             "/Library/Fonts/Arial Bold.ttf"},
+            {"C:/Windows/Fonts/arial.ttf",
+             "C:/Windows/Fonts/arialbd.ttf"},
+        };
+
+        for (const FontPair &cand : kCandidates) {
+            auto r = keel::fs_read_file(cand.regPath);
+            if (!r.is_ok() || r->empty())
+                continue;
+            keel::Array<keel::u8> bytes = keel::move(*r);
+            keel::font::FontFace face;
+            if (!face.load(bytes.as_ref()))
+                continue;
+            regBytes = keel::move(bytes);
+            regFace.load(regBytes.as_ref());
+
+            if (cand.boldPath) {
+                auto rb = keel::fs_read_file(cand.boldPath);
+                if (rb.is_ok() && !rb->empty()) {
+                    keel::Array<keel::u8> bbytes = keel::move(*rb);
+                    keel::font::FontFace bface;
+                    if (bface.load(bbytes.as_ref())) {
+                        boldBytes = keel::move(bbytes);
+                        boldFace.load(boldBytes.as_ref());
+                    }
+                }
+            }
+            break;
+        }
+    }
+};
+
+PlotFontCache &plotFontCache()
+{
+    static PlotFontCache cache;
+    return cache;
+}
+
+const keel::font::FontFace *getPlotFontFace(bool bold, bool &syntheticBold)
+{
+    PlotFontCache &cache = plotFontCache();
+    cache.ensureLoaded();
+    if (bold && cache.boldFace.is_valid()) {
+        syntheticBold = false;
+        return &cache.boldFace;
+    }
+    if (cache.regFace.is_valid()) {
+        syntheticBold = bold;
+        return &cache.regFace;
+    }
+    syntheticBold = false;
+    return nullptr;
+}
+
+keel::String decodeTexToUtf8(keel::StringRef src)
+{
+    if (src.find('\\') == keel::kInvalidIndex && src.find('^') == keel::kInvalidIndex)
+        return keel::String::from(src);
+
+    struct TexEntry {
+        const char *name;
+        const char *utf8;
+    };
+    static const TexEntry kTexSymbols[] = {
+        {"rightarrow", "\xE2\x86\x92"},
+        {"leftarrow",  "\xE2\x86\x90"},
+        {"varepsilon", "\xCE\xB5"},
+        {"vartheta",   "\xCF\x91"},
+        {"varsigma",   "\xCF\x82"},
+        {"epsilon",    "\xCE\xB5"},
+        {"upsilon",    "\xCF\x85"},
+        {"Upsilon",    "\xCE\xA5"},
+        {"approx",     "\xE2\x89\x88"},
+        {"lambda",     "\xCE\xBB"},
+        {"Lambda",     "\xCE\x9B"},
+        {"varphi",     "\xCF\x86"},
+        {"propto",     "\xE2\x88\x9D"},
+        {"partial",    "\xE2\x88\x82"},
+        {"alpha",      "\xCE\xB1"},
+        {"gamma",      "\xCE\xB3"},
+        {"Gamma",      "\xCE\x93"},
+        {"delta",      "\xCE\xB4"},
+        {"Delta",      "\xCE\x94"},
+        {"theta",      "\xCE\xB8"},
+        {"Theta",      "\xCE\x98"},
+        {"kappa",      "\xCE\xBA"},
+        {"sigma",      "\xCF\x83"},
+        {"Sigma",      "\xCE\xA3"},
+        {"omega",      "\xCF\x89"},
+        {"Omega",      "\xCE\xA9"},
+        {"times",      "\xC3\x97"},
+        {"infty",      "\xE2\x88\x9E"},
+        {"nabla",      "\xE2\x88\x87"},
+        {"equiv",      "\xE2\x89\xA1"},
+        {"beta",       "\xCE\xB2"},
+        {"zeta",       "\xCE\xB6"},
+        {"iota",       "\xCE\xB9"},
+        {"circ",       "\xC2\xB0"},
+        {"cdot",       "\xC2\xB7"},
+        {"sqrt",       "\xE2\x88\x9A"},
+        {"eta",        "\xCE\xB7"},
+        {"rho",        "\xCF\x81"},
+        {"tau",        "\xCF\x84"},
+        {"phi",        "\xCF\x86"},
+        {"Phi",        "\xCE\xA6"},
+        {"chi",        "\xCF\x87"},
+        {"psi",        "\xCF\x88"},
+        {"Psi",        "\xCE\xA8"},
+        {"deg",        "\xC2\xB0"},
+        {"div",        "\xC3\xB7"},
+        {"leq",        "\xE2\x89\xA4"},
+        {"geq",        "\xE2\x89\xA5"},
+        {"neq",        "\xE2\x89\xA0"},
+        {"mu",         "\xCE\xBC"},
+        {"nu",         "\xCE\xBD"},
+        {"xi",         "\xCE\xBE"},
+        {"Xi",         "\xCE\x9E"},
+        {"pi",         "\xCF\x80"},
+        {"Pi",         "\xCE\xA0"},
+        {"pm",         "\xC2\xB1"},
+        {"le",         "\xE2\x89\xA4"},
+        {"ge",         "\xE2\x89\xA5"},
+        {"ne",         "\xE2\x89\xA0"},
+    };
+
+    keel::String out;
+    out.reserve(src.size());
+    keel::usize i = 0;
+    while (i < src.size()) {
+        if (src[i] == '^') {
+            if (i + 6 <= src.size() && src.substr(i, 6) == "^\\circ") {
+                out.append("\xC2\xB0");
+                i += 6;
+                continue;
+            }
+            if (i + 8 <= src.size() && src.substr(i, 8) == "^{\\circ}") {
+                out.append("\xC2\xB0");
+                i += 8;
+                continue;
+            }
+        }
+        if (src[i] == '\\' && i + 1 < src.size()) {
+            keel::usize end = i + 1;
+            while (end < src.size() && keel::is_ascii_alpha(src[end]))
+                ++end;
+            if (end > i + 1) {
+                keel::StringRef cmd = src.substr(i + 1, end - (i + 1));
+                bool matched = false;
+                for (const TexEntry &e : kTexSymbols) {
+                    if (cmd == e.name) {
+                        out.append(e.utf8);
+                        i = end;
+                        matched = true;
+                        break;
+                    }
+                }
+                if (matched)
+                    continue;
+            }
+        }
+        out.push_back(src[i]);
+        ++i;
+    }
+    return out;
+}
+
+keel::f64 measureTextWidthPx(keel::StringRef utf8Text, keel::f64 fontSizePx, bool bold)
+{
+    if (utf8Text.empty())
+        return 0.0;
+    bool synthBold = false;
+    const keel::font::FontFace *face = getPlotFontFace(bold, synthBold);
+    if (!face)
+        return keel::as<keel::f64>(keel::utf8_codepoint_count(utf8Text)) * 0.6 * fontSizePx;
+
+    const keel::f32 sz = keel::as<keel::f32>(fontSizePx);
+    keel::f64 width = 0.0;
+    keel::u32 prevGid = 0;
+    bool hasPrev = false;
+    keel::usize off = 0;
+    while (off < utf8Text.size()) {
+        const keel::u32 cp = keel::utf8_decode_next(utf8Text, off);
+        const keel::u32 gid = face->glyph_index(cp);
+        if (hasPrev)
+            width += keel::as<keel::f64>(face->kerning_px(prevGid, gid, sz, keel::font::Hinting::Light));
+        width += keel::as<keel::f64>(face->advance_width_px(gid, sz, keel::font::Hinting::Light, synthBold));
+        prevGid = gid;
+        hasPrev = true;
+    }
+    return width;
+}
+
+keel::f64 fontCapHeightPx(keel::f64 fontSizePx, bool bold)
+{
+    bool synthBold = false;
+    const keel::font::FontFace *face = getPlotFontFace(bold, synthBold);
+    if (face && face->units_per_em() > 0 && face->cap_height() > 0)
+        return fontSizePx * keel::as<keel::f64>(face->cap_height()) / keel::as<keel::f64>(face->units_per_em());
+    return fontSizePx * 0.72;
+}
+
+keel::u8 linePatternFromStyle(keel::StringRef ls)
+{
+    if (ls == "--") return 1u;
+    if (ls == ":")  return 2u;
+    if (ls == "-.") return 3u;
+    return 0u;
+}
+
+} // namespace
 
 // ── Colour helpers ───────────────────────────────────────────────────
 struct Rgb {
@@ -102,10 +352,16 @@ struct StyleParts {
     bool hasColor = false;   // explicit colour (char or kv)
     keel::String lineStyle;  // "-", "--", ":", "-.", "" (unset), "none"
     keel::String marker;     // "", "o", "+", "*", ".", "x", "s", "d", …
+    Rgb markerFaceColor{0, 0, 0};
+    bool hasMarkerFaceColor = false;
+    bool markerFaceAuto = false;
+    Rgb markerEdgeColor{0, 0, 0};
+    bool hasMarkerEdgeColor = false;
+    bool markerEdgeNone = false;
     // histogram extras (portion 39; engine histogram() packs them):
-    Rgb faceColor{0x00, 0x72, 0xbd};   // MATLAB FaceColor 'auto'
+    Rgb faceColor{0x00, 0x72, 0xbd};
     bool hasFaceColor = false;
-    Rgb edgeColor{0xd9, 0xd9, 0xd9};   // MATLAB default light-gray edge
+    Rgb edgeColor{0xd9, 0xd9, 0xd9};
     bool hasEdgeColor = false;
     keel::f64 binWidth = 0;      // 0 = derive from consecutive spacing
     keel::f64 faceAlpha = 1;     // histogram FaceAlpha (default 0.6 comes
@@ -239,6 +495,20 @@ inline StyleParts parseStyle(keel::StringRef s)
                 p.lineStyle.assign(val);
             } else if (key == "marker") {
                 p.marker.assign(val);
+            } else if (key == "markerFaceColor") {
+                if (val == "auto") {
+                    p.markerFaceAuto = true;
+                } else if (val.size() >= 7 && val[0] == '#') {
+                    p.markerFaceColor = Rgb::fromHex(val);
+                    p.hasMarkerFaceColor = true;
+                }
+            } else if (key == "markerEdgeColor") {
+                if (val == "none") {
+                    p.markerEdgeNone = true;
+                } else if (val.size() >= 7 && val[0] == '#') {
+                    p.markerEdgeColor = Rgb::fromHex(val);
+                    p.hasMarkerEdgeColor = true;
+                }
             } else if (key == "faceColor") {
                 p.faceColor = Rgb::fromHex(val);
                 p.hasFaceColor = true;
@@ -384,16 +654,19 @@ struct Cmd {
                                   // IMAGE screen rect {x0,x1}/{y0,y1} of
                                   // the DATA rect [ix0,ix1]x[iy0,iy1]
     Rgb color;
+    Rgb fillColor{0, 0, 0};          // MARK: MarkerFaceColor
     keel::f64 width = 1.0;           // stroke width / marker size px
-    bool fill = false;            // POLY: filled
-    bool dash = false;            // LINE: dashed
-    keel::String text;            // TEXT
+    keel::f64 strokeWidth = 1.4;     // MARK: outline stroke width px
+    bool fill = false;            // POLY: filled; MARK: filled face
+    bool noEdge = false;          // MARK: MarkerEdgeColor == 'none'
+    bool dash = false;            // LINE: non-solid pattern
+    keel::u8 linePattern = 0u;    // LINE: 0=solid, 1=dashed(--), 2=dotted(:), 3=dashdot(-.)
+    keel::String text;            // TEXT / MARK kind
     keel::f64 fontSize = 12;         // TEXT
     keel::f64 x = 0, y = 0;          // TEXT baseline-left anchor / MARK centre
     bool rot90 = false;           // TEXT: rotate CCW (ylabel)
     bool bold = false;            // TEXT: FontWeight bold
-    keel::String fontFamily;      // TEXT: font name (SVG honours it;
-                                  // the raster backend is monospace)
+    keel::String fontFamily;      // TEXT: font name (SVG honours it)
 
     // ── IMAGE (imagesc / image / imshow) ─────────────────────────────
     // Indexed form: img holds cell indices 0..254 with 255 = NaN
@@ -732,7 +1005,8 @@ inline keel::Array<keel::String> parseTickLabelVec(keel::StringRef json)
 struct Rect { keel::f64 x0, y0, x1, y1; };   // pixel, y DOWN
 
 inline void addLine(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
-                    keel::ArrayRef<keel::f64> ys, Rgb c, keel::f64 w, bool dash)
+                    keel::ArrayRef<keel::f64> ys, Rgb c, keel::f64 w, bool dash,
+                    keel::u8 pattern = 0u)
 {
     Cmd cmd;
     cmd.kind = Cmd::LINE;
@@ -742,15 +1016,84 @@ inline void addLine(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
     for (keel::f64 v : ys) cmd.ys.push_back(v);
     cmd.color = c;
     cmd.width = w;
-    cmd.dash = dash;
+    cmd.linePattern = pattern != 0u ? pattern : (dash ? 1u : 0u);
+    cmd.dash = (cmd.linePattern != 0u);
     out.push_back(keel::move(cmd));
 }
 
 inline void addLine(keel::Array<Cmd> &out, std::initializer_list<keel::f64> xs,
-                    std::initializer_list<keel::f64> ys, Rgb c, keel::f64 w, bool dash)
+                    std::initializer_list<keel::f64> ys, Rgb c, keel::f64 w, bool dash,
+                    keel::u8 pattern = 0u)
 {
     addLine(out, keel::ArrayRef<keel::f64>(xs.begin(), xs.size()),
-            keel::ArrayRef<keel::f64>(ys.begin(), ys.size()), c, w, dash);
+            keel::ArrayRef<keel::f64>(ys.begin(), ys.size()), c, w, dash, pattern);
+}
+
+// Liang-Barsky segment clipping against pixel Rect [x0, x1] x [y0, y1].
+inline bool clipSegmentToRect(keel::f64 &x0, keel::f64 &y0, keel::f64 &x1, keel::f64 &y1,
+                              const Rect &r)
+{
+    const keel::f64 dx = x1 - x0;
+    const keel::f64 dy = y1 - y0;
+    keel::f64 t0 = 0.0, t1 = 1.0;
+    auto clipTest = [&](keel::f64 p, keel::f64 q) -> bool {
+        if (keel::abs(p) < 1e-12)
+            return q >= 0.0;
+        const keel::f64 u = q / p;
+        if (p < 0.0) {
+            if (u > t1) return false;
+            if (u > t0) t0 = u;
+        } else {
+            if (u < t0) return false;
+            if (u < t1) t1 = u;
+        }
+        return true;
+    };
+    if (!clipTest(-dx, x0 - r.x0)) return false;
+    if (!clipTest( dx, r.x1 - x0)) return false;
+    if (!clipTest(-dy, y0 - r.y0)) return false;
+    if (!clipTest( dy, r.y1 - y0)) return false;
+    const keel::f64 nx0 = x0 + t0 * dx;
+    const keel::f64 ny0 = y0 + t0 * dy;
+    const keel::f64 nx1 = x0 + t1 * dx;
+    const keel::f64 ny1 = y0 + t1 * dy;
+    x0 = nx0; y0 = ny0; x1 = nx1; y1 = ny1;
+    return true;
+}
+
+inline void addClippedLine(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
+                           keel::ArrayRef<keel::f64> ys, const Rect &clip, Rgb c,
+                           keel::f64 w, keel::u8 pattern)
+{
+    if (xs.size() < 2 || ys.size() < 2)
+        return;
+    const keel::usize n = keel::min(xs.size(), ys.size());
+    keel::Array<keel::f64> runX, runY;
+    auto flush = [&]() {
+        if (runX.size() >= 2)
+            addLine(out, runX, runY, c, w, pattern != 0u, pattern);
+        runX.clear();
+        runY.clear();
+    };
+    for (keel::usize i = 0; i + 1 < n; ++i) {
+        keel::f64 ax = xs[i], ay = ys[i];
+        keel::f64 bx = xs[i + 1], by = ys[i + 1];
+        if (!clipSegmentToRect(ax, ay, bx, by, clip)) {
+            flush();
+            continue;
+        }
+        if (runX.empty()) {
+            runX.push_back(ax);
+            runY.push_back(ay);
+        } else if (keel::abs(runX.back() - ax) > 1e-4 || keel::abs(runY.back() - ay) > 1e-4) {
+            flush();
+            runX.push_back(ax);
+            runY.push_back(ay);
+        }
+        runX.push_back(bx);
+        runY.push_back(by);
+    }
+    flush();
 }
 
 inline void addText(keel::Array<Cmd> &out, keel::StringRef s, keel::f64 x,
@@ -759,9 +1102,12 @@ inline void addText(keel::Array<Cmd> &out, keel::StringRef s, keel::f64 x,
 {
     if (s.empty())
         return;
+    keel::String decoded = decodeTexToUtf8(s);
+    if (decoded.empty())
+        return;
     Cmd cmd;
     cmd.kind = Cmd::TEXT;
-    cmd.text = keel::String::from(s);
+    cmd.text = keel::move(decoded);
     cmd.x = x;
     cmd.y = y;
     cmd.fontSize = size;
@@ -773,16 +1119,21 @@ inline void addText(keel::Array<Cmd> &out, keel::StringRef s, keel::f64 x,
 }
 
 inline void addMarker(keel::Array<Cmd> &out, keel::f64 x, keel::f64 y, keel::f64 size,
-                      Rgb c, keel::StringRef kind)
+                      Rgb edgeColor, keel::StringRef kind, bool hasFill = false,
+                      Rgb fillColor = Rgb(0, 0, 0), bool noEdge = false,
+                      keel::f64 strokeW = 1.4)
 {
     Cmd cmd;
     cmd.kind = Cmd::MARK;
     cmd.x = x;
     cmd.y = y;
     cmd.width = size;
-    cmd.color = c;
+    cmd.strokeWidth = strokeW;
+    cmd.color = edgeColor;
+    cmd.fillColor = fillColor;
     cmd.text = keel::String::from(kind);   // marker glyph selector
-    cmd.fill = true;
+    cmd.fill = hasFill;
+    cmd.noEdge = noEdge;
     out.push_back(keel::move(cmd));
 }
 
@@ -810,24 +1161,16 @@ inline void addPoly(keel::Array<Cmd> &out, std::initializer_list<keel::f64> xs,
             keel::ArrayRef<keel::f64>(ys.begin(), ys.size()), c, fill);
 }
 
-// Render ONE axes into its pixel rect. `seriesIdxBase` continues the
-// palette cycle across subplot cells (MATLAB restarts per axes; keep
-// simple: per-axes reset).
+// Render ONE axes into its pixel rect. When `directPlotRect` is true, `box`
+// already represents the inner plot box (projected from normalized Axes.Position).
 inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect box,
-                       keel::Array<Cmd> &out)
+                       keel::Array<Cmd> &out, bool directPlotRect = false,
+                       keel::f64 uiScale = 1.0, keel::f64 ptToPx = 1.0)
 {
-    const Rgb kAxisCol(0x40, 0x40, 0x44);
-    const Rgb kGridCol(0xd8, 0xd8, 0xdc);
-    const Rgb kTextCol(0x28, 0x28, 0x30);
+    const Rgb kAxisCol(0x26, 0x26, 0x26);
+    const Rgb kGridCol(0xe2, 0xe2, 0xe2);
+    const Rgb kTextCol(0x18, 0x18, 0x18);
 
-    // Margin: room for tick labels + axis labels. axis off (`axis off`,
-    // imshow) drops the decorations — a slim inset only, the image gets
-    // the canvas (probe: imshow fills the saved figure).
-    keel::f64 ml = 64, mr = 14, mt = 20, mb = 48;
-    if (!ax.title.empty())
-        mt += 18;
-    // Colorbar reserves space on its side (MATLAB eastoutside shrinks the
-    // axes to ~0.68 width; we reserve strip + ticks + labels).
     keel::String cbSide = ax.colorbarLocation.clone();
     cbSide.to_ascii_lower_in_place();
     if (cbSide.size() > 7
@@ -835,23 +1178,44 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
         cbSide = keel::String::from(cbSide.substr(0, cbSide.size() - 7));
     if (cbSide.empty() || cbSide == "best")
         cbSide = ax.colorbarLocation.empty() ? keel::String{} : keel::String::from("east");
-    if (!cbSide.empty() && cbSide != "none") {
-        if (cbSide == "east")
-            mr += 48;
-        else if (cbSide == "west")
-            ml += 48;
-        else if (cbSide == "south")
-            mb += 48;
-        else if (cbSide == "north")
-            mt += 34;
-    }
-    if (ax.yyEnabled)
-        mr += 48;
-    Rect plot{box.x0 + ml, box.y0 + mt, box.x1 - mr, box.y1 - mb};
-    if (!ax.axisVisible) {
-        plot = Rect{box.x0 + 4, box.y0 + 4, box.x1 - 4, box.y1 - 4};
+
+    Rect plot = box;
+    if (directPlotRect) {
+        if (!cbSide.empty() && cbSide != "none") {
+            const keel::f64 cbPad = 48.0 * uiScale;
+            if (cbSide == "east")
+                plot.x1 -= cbPad;
+            else if (cbSide == "west")
+                plot.x0 += cbPad;
+            else if (cbSide == "south")
+                plot.y1 -= cbPad;
+            else if (cbSide == "north")
+                plot.y0 += 34.0 * uiScale;
+        }
+        if (ax.yyEnabled)
+            plot.x1 -= 24.0 * uiScale;
+    } else {
+        keel::f64 ml = 64, mr = 14, mt = 20, mb = 48;
         if (!ax.title.empty())
-            plot.y0 += 18;
+            mt += 18;
+        if (!cbSide.empty() && cbSide != "none") {
+            if (cbSide == "east")
+                mr += 48;
+            else if (cbSide == "west")
+                ml += 48;
+            else if (cbSide == "south")
+                mb += 48;
+            else if (cbSide == "north")
+                mt += 34;
+        }
+        if (ax.yyEnabled)
+            mr += 48;
+        plot = Rect{box.x0 + ml, box.y0 + mt, box.x1 - mr, box.y1 - mb};
+        if (!ax.axisVisible) {
+            plot = Rect{box.x0 + 4, box.y0 + 4, box.x1 - 4, box.y1 - 4};
+            if (!ax.title.empty())
+                plot.y0 += 18;
+        }
     }
 
     auto applyLim = [](const keel::String &json, keel::f64 &lo, keel::f64 &hi) {
@@ -1212,13 +1576,22 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
     auto Y2 = [&](keel::f64 v) { return YR2.map(v, py0, py1); };
 
     // ── Grid (under the data) ───────────────────────────────────────
-    if (ax.gridMajor && ax.gridUserTouched) {
-        auto gx = XR.log ? logTicks(xlo, xhi) : niceTicks(xlo, xhi);
-        auto gy = YR.log ? logTicks(ylo, yhi) : niceTicks(ylo, yhi);
+    if (ax.gridMajor && ax.gridUserTouched && ax.axisVisible) {
+        auto gx = !ax.xTicksJson.empty()
+                      ? parseVec(ax.xTicksJson)
+                      : (XR.log ? logTicks(xlo, xhi) : niceTicks(xlo, xhi));
+        auto gy = !ax.yTicksJson.empty()
+                      ? parseVec(ax.yTicksJson)
+                      : (YR.log ? logTicks(ylo, yhi) : niceTicks(ylo, yhi));
+        const keel::f64 gridW = keel::max(0.75, 0.75 * uiScale);
+        const keel::f64 xEps = (xhi - xlo) * 1e-6;
+        const keel::f64 yEps = (yhi - ylo) * 1e-6;
         for (keel::f64 v : gx)
-            addLine(out, {X(v), X(v)}, {plot.y0, plot.y1}, kGridCol, 1, false);
+            if (v >= xlo - xEps && v <= xhi + xEps)
+                addLine(out, {X(v), X(v)}, {plot.y0, plot.y1}, kGridCol, gridW, false);
         for (keel::f64 v : gy)
-            addLine(out, {plot.x0, plot.x1}, {Y(v), Y(v)}, kGridCol, 1, false);
+            if (v >= ylo - yEps && v <= yhi + yEps)
+                addLine(out, {plot.x0, plot.x1}, {Y(v), Y(v)}, kGridCol, gridW, false);
     }
 
     // ── Images (under series — MATLAB draws lines over the image) ───
@@ -1591,19 +1964,30 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
             st.color = palette()[seriesIdx % palette().size()];
         ++seriesIdx;
         Rgb col = st.color;
-        keel::f64 lw = ds.lineWidth > 0 ? ds.lineWidth : (st.lineStyle == "-" || st.lineStyle.empty() ? 1.4 : 1.4);
-        keel::f64 ms = ds.markerSize > 0 ? ds.markerSize * 1.4 : 6.0;
-        bool dashed = st.lineStyle == "--" || st.lineStyle == ":" || st.lineStyle == "-.";
+        const keel::f64 lwPts = ds.lineWidth > 0 ? ds.lineWidth : 1.0;
+        const keel::f64 lw = keel::max(0.75, lwPts * ptToPx);
+        const keel::f64 msPts = ds.markerSize > 0 ? ds.markerSize : 6.0;
+        const keel::f64 ms = msPts * ptToPx;
+        const keel::u8 pat = linePatternFromStyle(st.lineStyle);
+        const Rgb mkEdge = st.hasMarkerEdgeColor ? st.markerEdgeColor : col;
+        const bool mkHasFill = st.hasMarkerFaceColor || st.markerFaceAuto;
+        const Rgb mkFill = st.hasMarkerFaceColor ? st.markerFaceColor : col;
+        const bool mkNoEdge = st.markerEdgeNone;
+        const keel::f64 mkStrokeW = keel::max(1.0, lwPts * ptToPx);
         const keel::usize n = keel::min(xs[i].size(), ys[i].size());
         const keel::String &t = ds.type;
         const AxisRange &YRs = (ax.yyEnabled && ds.yside == "right") ? YR2 : YR;
         auto Ys = [&](keel::f64 v) { return YRs.map(v, py0, py1); };
+        auto markerInPlot = [&](keel::f64 mx, keel::f64 my) -> bool {
+            return mx >= plot.x0 - 2.0 && mx <= plot.x1 + 2.0
+                && my >= plot.y0 - 2.0 && my <= plot.y1 + 2.0;
+        };
 
         if (t == "line" || t == "comet" || t == "animatedline") {
             keel::Array<keel::f64> px, py;
             auto flushRun = [&]() {
                 if (st.lineStyle != "none" && px.size() >= 2)
-                    addLine(out, px, py, col, lw, dashed);
+                    addClippedLine(out, px, py, plot, col, lw, pat);
                 px.clear();
                 py.clear();
             };
@@ -1616,9 +2000,16 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                 }
             }
             flushRun();
-            if (!st.marker.empty())
-                for (keel::usize k = 0; k < px.size(); ++k)
-                    addMarker(out, px[k], py[k], ms, col, st.marker);
+            if (!st.marker.empty() && st.marker != "none") {
+                for (keel::usize k = 0; k < n; ++k) {
+                    if (!keel::is_finite(xs[i][k]) || !keel::is_finite(ys[i][k]))
+                        continue;
+                    const keel::f64 mx = X(xs[i][k]);
+                    const keel::f64 my = Ys(ys[i][k]);
+                    if (markerInPlot(mx, my))
+                        addMarker(out, mx, my, ms, mkEdge, st.marker, mkHasFill, mkFill, mkNoEdge, mkStrokeW);
+                }
+            }
         } else if (t == "stairs") {
             keel::Array<keel::f64> px, py;
             for (keel::usize k = 0; k < n; ++k) {
@@ -1629,28 +2020,46 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
                 px.push_back(X(xs[i][k]));
                 py.push_back(Ys(ys[i][k]));
             }
-            if (px.size() >= 2)
-                addLine(out, px, py, col, lw, dashed);
-            if (!st.marker.empty())
-                for (keel::usize k = 0; k < n; ++k)
-                    addMarker(out, X(xs[i][k]), Ys(ys[i][k]), ms, col, st.marker);
+            if (st.lineStyle != "none" && px.size() >= 2)
+                addClippedLine(out, px, py, plot, col, lw, pat);
+            if (!st.marker.empty() && st.marker != "none") {
+                for (keel::usize k = 0; k < n; ++k) {
+                    const keel::f64 mx = X(xs[i][k]);
+                    const keel::f64 my = Ys(ys[i][k]);
+                    if (markerInPlot(mx, my))
+                        addMarker(out, mx, my, ms, mkEdge, st.marker, mkHasFill, mkFill, mkNoEdge, mkStrokeW);
+                }
+            }
         } else if (t == "stem") {
             keel::f64 base = 0;
             if (base >= YRs.lo && base <= YRs.hi)
-                for (keel::usize k = 0; k < n; ++k)
-                    addLine(out, {X(xs[i][k]), X(xs[i][k])},
-                            {Ys(base), Ys(ys[i][k])}, col, lw, dashed);
-            for (keel::usize k = 0; k < n; ++k)
-                addMarker(out, X(xs[i][k]), Ys(ys[i][k]), ms,
-                          col, st.marker.empty() ? keel::StringRef("o") : st.marker.as_ref());
+                for (keel::usize k = 0; k < n; ++k) {
+                    keel::f64 sx[2] = {X(xs[i][k]), X(xs[i][k])};
+                    keel::f64 sy[2] = {Ys(base), Ys(ys[i][k])};
+                    addClippedLine(out, keel::ArrayRef<keel::f64>(sx, 2),
+                                   keel::ArrayRef<keel::f64>(sy, 2), plot, col, lw, pat);
+                }
+            for (keel::usize k = 0; k < n; ++k) {
+                const keel::f64 mx = X(xs[i][k]);
+                const keel::f64 my = Ys(ys[i][k]);
+                if (markerInPlot(mx, my))
+                    addMarker(out, mx, my, ms, mkEdge,
+                              st.marker.empty() ? keel::StringRef("o") : st.marker.as_ref(),
+                              mkHasFill, mkFill, mkNoEdge, mkStrokeW);
+            }
         } else if (t == "scatter" || t == "bubble") {
             keel::Array<keel::f64> sz;
             if (!ds.sizeJson.empty())
                 sz = parseVec(ds.sizeJson);
-            for (keel::usize k = 0; k < n; ++k)
-                addMarker(out, X(xs[i][k]), Ys(ys[i][k]),
-                          sz.empty() ? ms : keel::max(3.0, keel::sqrt(sz[k] / 3.14) * 1.6),
-                          col, "o");
+            for (keel::usize k = 0; k < n; ++k) {
+                const keel::f64 mx = X(xs[i][k]);
+                const keel::f64 my = Ys(ys[i][k]);
+                if (markerInPlot(mx, my))
+                    addMarker(out, mx, my,
+                              sz.empty() ? ms : keel::max(3.0, keel::sqrt(sz[k] / 3.14) * 1.6 * ptToPx),
+                              mkEdge, st.marker.empty() ? keel::StringRef("o") : st.marker.as_ref(),
+                              mkHasFill, mkFill, mkNoEdge, mkStrokeW);
+            }
         } else if (t == "histogram") {
             Rgb face = st.hasFaceColor ? st.faceColor : Rgb(0x00, 0x72, 0xbd);
             Rgb edge = st.edgeColor;
@@ -1775,90 +2184,130 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
         if (xv.empty() || yv.empty())
             continue;
         TextExtras te = parseTextExtras(ds.style);
-        keel::f64 scale = keel::max(1.0, (keel::f64)keel::round_i64(te.fontSize / 7.0));
-        keel::f64 w = 6.0 * scale * ds.label.size();
-        keel::f64 x = X(xv[0]) - (te.halign == 1 ? w / 2
-                          : te.halign == 2 ? w : 0.0);
-        keel::f64 y = Y(yv[0]) - 3.5 * scale;
-        addText(out, ds.label, x, y, te.fontSize, te.color, false, false,
-                "");
+        const keel::f64 fsPx = te.fontSize * ptToPx;
+        const keel::String dec = decodeTexToUtf8(ds.label);
+        const keel::f64 w = measureTextWidthPx(dec, fsPx, false);
+        const keel::f64 capH = fontCapHeightPx(fsPx, false);
+        const keel::f64 x = X(xv[0]) - (te.halign == 1 ? w * 0.5
+                                        : te.halign == 2 ? w : 0.0);
+        const keel::f64 y = Y(yv[0]) + capH * 0.36;
+        addText(out, ds.label, x, y, fsPx, te.color, false, false, "sans-serif");
     }
 
-    const keel::f64 boxW = keel::max(0.75, ax.lineWidth);
-    const keel::f64 tickFS = ax.fontSize;
-    const keel::f64 labelFS = ax.fontSize * 1.1;
+    const keel::f64 boxW = keel::max(0.75, ax.lineWidth * uiScale);
+    const keel::f64 baseFS = ax.fontSize > 0.0 ? ax.fontSize : 10.0;
+    const keel::f64 tickFS = baseFS * ptToPx;
+    const keel::f64 labelFS = baseFS * 1.1 * ptToPx;
+    const keel::f64 titleFS = baseFS * 1.1 * ptToPx;
     const bool fBold = ax.fontWeight == "bold";
     const keel::String &fam = ax.fontName;
+    const keel::f64 tickCapH = fontCapHeightPx(tickFS, fBold);
+    const keel::f64 labelCapH = fontCapHeightPx(labelFS, fBold);
+    const keel::f64 tickLen = 5.0 * uiScale;
+    const keel::f64 tickGap = 6.0 * uiScale;
     if (ax.axisVisible) {
-    addLine(out, {plot.x0, plot.x1, plot.x1, plot.x0, plot.x0},
-            {plot.y0, plot.y0, plot.y1, plot.y1, plot.y0}, kAxisCol, boxW,
-            false);
-    auto tx = !ax.xTicksJson.empty()
-                  ? parseVec(ax.xTicksJson)
-                  : (XR.log ? logTicks(xlo, xhi) : niceTicks(xlo, xhi));
-    auto ty = !ax.yTicksJson.empty()
-                  ? parseVec(ax.yTicksJson)
-                  : (YR.log ? logTicks(ylo, yhi) : niceTicks(ylo, yhi));
-    keel::Array<keel::String> txLab, tyLab;
-    if (!ax.xTickLabelsJson.empty())
-        txLab = parseTickLabelVec(ax.xTickLabelsJson);
-    if (!ax.yTickLabelsJson.empty())
-        tyLab = parseTickLabelVec(ax.yTickLabelsJson);
-    for (keel::usize k = 0; k < tx.size(); ++k) {
-        const keel::f64 v = tx[k];
-        keel::f64 p = X(v);
-        addLine(out, {p, p}, {plot.y1, plot.y1 + 4}, kAxisCol, boxW, false);
-        keel::String lab = k < txLab.size()
-                               ? txLab[k].clone()
-                               : tickLabel(v);
-        if (k >= txLab.size() && !ax.xTickFormat.empty()
-            && ax.xTickFormat.size() > 1 && ax.xTickFormat[0] == '%') {
-            lab = formatTickSpec(ax.xTickFormat.as_ref(), v);
+        if (ax.boxOn) {
+            addLine(out, {plot.x0, plot.x1, plot.x1, plot.x0, plot.x0},
+                    {plot.y0, plot.y0, plot.y1, plot.y1, plot.y0}, kAxisCol, boxW, false);
+        } else {
+            addLine(out, {plot.x0, plot.x1}, {plot.y1, plot.y1}, kAxisCol, boxW, false);
+            addLine(out, {plot.x0, plot.x0}, {plot.y0, plot.y1}, kAxisCol, boxW, false);
         }
-        addText(out, lab, p - 3.0 * lab.size(), plot.y1 + 8, tickFS,
-                kTextCol, false, fBold, fam);
-    }
-    for (keel::usize k = 0; k < ty.size(); ++k) {
-        const keel::f64 v = ty[k];
-        keel::f64 p = Y(v);
-        addLine(out, {plot.x0 - 4, plot.x0}, {p, p}, kAxisCol, boxW, false);
-        keel::String lab = k < tyLab.size()
-                               ? tyLab[k].clone()
-                               : tickLabel(v);
-        if (k >= tyLab.size() && !ax.yTickFormat.empty()
-            && ax.yTickFormat.size() > 1 && ax.yTickFormat[0] == '%') {
-            lab = formatTickSpec(ax.yTickFormat.as_ref(), v);
+        auto tx = !ax.xTicksJson.empty()
+                      ? parseVec(ax.xTicksJson)
+                      : (XR.log ? logTicks(xlo, xhi) : niceTicks(xlo, xhi));
+        auto ty = !ax.yTicksJson.empty()
+                      ? parseVec(ax.yTicksJson)
+                      : (YR.log ? logTicks(ylo, yhi) : niceTicks(ylo, yhi));
+        keel::Array<keel::String> txLab, tyLab;
+        if (!ax.xTickLabelsJson.empty())
+            txLab = parseTickLabelVec(ax.xTickLabelsJson);
+        if (!ax.yTickLabelsJson.empty())
+            tyLab = parseTickLabelVec(ax.yTickLabelsJson);
+        const keel::f64 xEps = (xhi - xlo) * 1e-6;
+        const keel::f64 yEps = (yhi - ylo) * 1e-6;
+        for (keel::usize k = 0; k < tx.size(); ++k) {
+            const keel::f64 v = tx[k];
+            if (v < xlo - xEps || v > xhi + xEps)
+                continue;
+            const keel::f64 p = X(v);
+            addLine(out, {p, p}, {plot.y1, plot.y1 - tickLen}, kAxisCol, boxW, false);
+            keel::String lab = k < txLab.size()
+                                   ? txLab[k].clone()
+                                   : tickLabel(v);
+            if (k >= txLab.size() && !ax.xTickFormat.empty()
+                && ax.xTickFormat.size() > 1 && ax.xTickFormat[0] == '%') {
+                lab = formatTickSpec(ax.xTickFormat.as_ref(), v);
+            }
+            const keel::String dec = decodeTexToUtf8(lab);
+            const keel::f64 tw = measureTextWidthPx(dec, tickFS, fBold);
+            addText(out, lab, p - tw * 0.5, plot.y1 + tickGap + tickCapH, tickFS,
+                    kTextCol, false, fBold, fam);
         }
-        keel::f64 w = 6.0 * lab.size();
-        addText(out, lab, plot.x0 - 8 - w, p + 4, tickFS, kTextCol, false,
-                fBold, fam);
-    }
-    if (ax.yyEnabled) {
-        auto ty2 = YR2.log ? logTicks(y2lo, y2hi) : niceTicks(y2lo, y2hi);
-        for (keel::usize k = 0; k < ty2.size(); ++k) {
-            const keel::f64 v = ty2[k];
-            keel::f64 p = Y2(v);
-            addLine(out, {plot.x1, plot.x1 + 4}, {p, p}, kAxisCol, boxW, false);
-            keel::String lab = tickLabel(v);
-            addText(out, lab, plot.x1 + 8, p + 4, tickFS, kTextCol, false,
-                    fBold, fam);
+        keel::f64 maxYTickW = 0.0;
+        for (keel::usize k = 0; k < ty.size(); ++k) {
+            const keel::f64 v = ty[k];
+            if (v < ylo - yEps || v > yhi + yEps)
+                continue;
+            const keel::f64 p = Y(v);
+            addLine(out, {plot.x0, plot.x0 + tickLen}, {p, p}, kAxisCol, boxW, false);
+            keel::String lab = k < tyLab.size()
+                                   ? tyLab[k].clone()
+                                   : tickLabel(v);
+            if (k >= tyLab.size() && !ax.yTickFormat.empty()
+                && ax.yTickFormat.size() > 1 && ax.yTickFormat[0] == '%') {
+                lab = formatTickSpec(ax.yTickFormat.as_ref(), v);
+            }
+            const keel::String dec = decodeTexToUtf8(lab);
+            const keel::f64 tw = measureTextWidthPx(dec, tickFS, fBold);
+            if (tw > maxYTickW)
+                maxYTickW = tw;
+            addText(out, lab, plot.x0 - tickGap - tw, p + tickCapH * 0.36, tickFS,
+                    kTextCol, false, fBold, fam);
         }
-        if (!ax.ylabel2.empty())
-            addText(out, ax.ylabel2, plot.x1 + 42,
-                    (plot.y0 + plot.y1) / 2 + 3.2 * ax.ylabel2.size(), labelFS,
+        if (ax.yyEnabled) {
+            auto ty2 = YR2.log ? logTicks(y2lo, y2hi) : niceTicks(y2lo, y2hi);
+            keel::f64 maxY2W = 0.0;
+            for (keel::usize k = 0; k < ty2.size(); ++k) {
+                const keel::f64 v = ty2[k];
+                const keel::f64 p = Y2(v);
+                addLine(out, {plot.x1 - tickLen, plot.x1}, {p, p}, kAxisCol, boxW, false);
+                keel::String lab = tickLabel(v);
+                const keel::f64 tw = measureTextWidthPx(lab, tickFS, fBold);
+                if (tw > maxY2W)
+                    maxY2W = tw;
+                addText(out, lab, plot.x1 + tickGap, p + tickCapH * 0.36, tickFS, kTextCol, false,
+                        fBold, fam);
+            }
+            if (!ax.ylabel2.empty()) {
+                const keel::String dec = decodeTexToUtf8(ax.ylabel2);
+                const keel::f64 tw = measureTextWidthPx(dec, labelFS, fBold);
+                addText(out, ax.ylabel2, plot.x1 + tickGap + maxY2W + 10.0 * uiScale + labelCapH,
+                        (plot.y0 + plot.y1) * 0.5 + tw * 0.5, labelFS,
+                        kTextCol, /*rot90=*/true, fBold, fam);
+            }
+        }
+        if (!ax.xlabel.empty()) {
+            const keel::String dec = decodeTexToUtf8(ax.xlabel);
+            const keel::f64 tw = measureTextWidthPx(dec, labelFS, fBold);
+            addText(out, ax.xlabel, (plot.x0 + plot.x1) * 0.5 - tw * 0.5,
+                    plot.y1 + tickGap + tickCapH + 10.0 * uiScale + labelCapH,
+                    labelFS, kTextCol, false, fBold, fam);
+        }
+        if (!ax.ylabel.empty()) {
+            const keel::String dec = decodeTexToUtf8(ax.ylabel);
+            const keel::f64 tw = measureTextWidthPx(dec, labelFS, fBold);
+            addText(out, ax.ylabel, plot.x0 - tickGap - maxYTickW - 10.0 * uiScale,
+                    (plot.y0 + plot.y1) * 0.5 + tw * 0.5, labelFS,
                     kTextCol, /*rot90=*/true, fBold, fam);
-    }
-    if (!ax.xlabel.empty())
-        addText(out, ax.xlabel, (plot.x0 + plot.x1) / 2 - 3.2 * ax.xlabel.size(),
-                plot.y1 + 34, labelFS, kTextCol, false, fBold, fam);
-    if (!ax.ylabel.empty())
-        addText(out, ax.ylabel, plot.x0 - 46,
-                (plot.y0 + plot.y1) / 2 + 3.2 * ax.ylabel.size(), labelFS,
-                kTextCol, /*rot90=*/true, fBold, fam);
+        }
     }   // end axisVisible decorations
-    if (!ax.title.empty())
-        addText(out, ax.title, (plot.x0 + plot.x1) / 2 - 3.2 * ax.title.size(),
-                plot.y0 - 18, labelFS + 2, kTextCol, false, fBold, fam);
+    if (!ax.title.empty()) {
+        const keel::String dec = decodeTexToUtf8(ax.title);
+        const keel::f64 tw = measureTextWidthPx(dec, titleFS, /*bold=*/true);
+        addText(out, ax.title, (plot.x0 + plot.x1) * 0.5 - tw * 0.5,
+                plot.y0 - 9.0 * uiScale, titleFS, kTextCol, false, /*bold=*/true, fam);
+    }
 
     // ── Colorbar (portion 38; probe-verified R2025b: limits = CLim, ──
     // vertical ticks = the 10-interval ladder (12 for [1 12]), a
@@ -1971,76 +2420,182 @@ inline void renderAxes(const FigureState & /*fig*/, const AxesState &ax, Rect bo
 
     // ── Legend ──────────────────────────────────────────────────────
     if (!ax.legendLabels.empty() && !ax.legendHidden) {
-        keel::f64 rowH = 16, pad2 = 6;
-        keel::f64 lw2 = 22, tw = 0;
-        for (auto &s2 : ax.legendLabels)
-            tw = keel::max(tw, 6.0 * s2.size());
-        keel::f64 wLegend = pad2 + lw2 + 6 + tw + pad2;
-        keel::f64 hLegend = pad2 + rowH * ax.legendLabels.size() + pad2;
-        keel::f64 lx = plot.x1 - 10 - wLegend, ly = plot.y0 + 10;
+        const keel::f64 lgFS = baseFS * 0.9 * ptToPx;
+        const keel::f64 lgCapH = fontCapHeightPx(lgFS, false);
+        const keel::f64 rowH = keel::max(lgCapH * 1.65, 14.0 * uiScale);
+        const keel::f64 padX = 8.0 * uiScale;
+        const keel::f64 padY = 6.0 * uiScale;
+        const keel::f64 swatchW = 28.0 * uiScale;
+        const keel::f64 gap = 7.0 * uiScale;
+        keel::f64 tw = 0.0;
+        for (const auto &s2 : ax.legendLabels) {
+            const keel::String dec = decodeTexToUtf8(s2);
+            tw = keel::max(tw, measureTextWidthPx(dec, lgFS, false));
+        }
+        const keel::f64 wLegend = padX + swatchW + gap + tw + padX;
+        const keel::f64 hLegend = padY + rowH * keel::as<keel::f64>(ax.legendLabels.size()) + padY;
+        const keel::f64 margin = 8.0 * uiScale;
+        keel::f64 lx = plot.x1 - margin - wLegend;
+        keel::f64 ly = plot.y0 + margin;
         if (ax.legendLocation.find("south") != keel::kInvalidIndex)
-            ly = plot.y1 - 10 - hLegend;
+            ly = plot.y1 - margin - hLegend;
         if (ax.legendLocation.find("west") != keel::kInvalidIndex)
-            lx = plot.x0 + 10;
+            lx = plot.x0 + margin;
         if (ax.legendLocation.find("outside") != keel::kInvalidIndex)
-            lx = plot.x1 + 8;
+            lx = plot.x1 + margin;
+
+        // Opaque white legend card + subtle border when Box is on.
         addPoly(out, {lx, lx + wLegend, lx + wLegend, lx},
-                {ly, ly, ly + hLegend, ly + hLegend}, kAxisCol, false);
+                {ly, ly, ly + hLegend, ly + hLegend}, Rgb(255, 255, 255), true);
+        if (ax.legendBoxOn) {
+            addLine(out, {lx, lx + wLegend, lx + wLegend, lx, lx},
+                    {ly, ly, ly + hLegend, ly + hLegend, ly}, kAxisCol,
+                    keel::max(0.75, 0.75 * uiScale), false);
+        }
+
+        // Collect visible, handle-visible chart datasets in creation order for fallback lookup.
+        keel::Array<const DatasetInfo *> visibleSeries;
+        for (keel::usize d = 0; d < ax.datasets.size(); ++d) {
+            const DatasetInfo &ds = ax.datasets[d];
+            if (!ds.visible || !ds.handleVisible || ds.type == "text"
+                || ds.type == "imagesc" || ds.type == "image-rgb")
+                continue;
+            visibleSeries.push_back(&ds);
+        }
+
         for (keel::usize k = 0; k < ax.legendLabels.size(); ++k) {
-            keel::f64 ry = ly + pad2 + rowH * k + rowH / 2;
-            Rgb c = palette()[k % palette().size()];
-            for (keel::usize d = 0; d < ax.datasets.size(); ++d) {
-                if (ax.datasets[d].label == ax.legendLabels[k]) {
-                    StyleParts sp = parseStyle(ax.datasets[d].style);
-                    if (sp.hasColor)
-                        c = sp.color;
+            const keel::f64 ry = ly + padY + rowH * keel::as<keel::f64>(k) + rowH * 0.5;
+            const DatasetInfo *matched = nullptr;
+            for (const DatasetInfo *ds : visibleSeries) {
+                if (ds->label == ax.legendLabels[k]) {
+                    matched = ds;
                     break;
                 }
             }
-            addLine(out, {lx + pad2, lx + pad2 + lw2}, {ry, ry}, c, 1.6, false);
-            addText(out, ax.legendLabels[k], lx + pad2 + lw2 + 6, ry + 4, 11,
-                    kTextCol);
+            if (!matched && k < visibleSeries.size())
+                matched = visibleSeries[k];
+
+            Rgb c = palette()[k % palette().size()];
+            keel::u8 pat = 0u;
+            keel::f64 swLw = keel::max(1.2, 1.4 * ptToPx);
+            bool drawLine = true;
+            StyleParts sp;
+            if (matched) {
+                sp = parseStyle(matched->style);
+                if (sp.hasColor)
+                    c = sp.color;
+                pat = linePatternFromStyle(sp.lineStyle);
+                if (matched->lineWidth > 0.0)
+                    swLw = keel::max(1.0, matched->lineWidth * ptToPx);
+                if (sp.lineStyle == "none")
+                    drawLine = false;
+            }
+            if (drawLine) {
+                addLine(out, {lx + padX, lx + padX + swatchW}, {ry, ry},
+                        c, swLw, pat != 0u, pat);
+            }
+            if (matched && !sp.marker.empty() && sp.marker != "none") {
+                const keel::f64 msPts = matched->markerSize > 0.0 ? matched->markerSize : 6.0;
+                const keel::f64 swMs = msPts * ptToPx;
+                const Rgb mkEdge = sp.hasMarkerEdgeColor ? sp.markerEdgeColor : c;
+                const bool mkHasFill = sp.hasMarkerFaceColor || sp.markerFaceAuto;
+                const Rgb mkFill = sp.hasMarkerFaceColor ? sp.markerFaceColor : c;
+                addMarker(out, lx + padX + swatchW * 0.5, ry, swMs, mkEdge, sp.marker,
+                          mkHasFill, mkFill, sp.markerEdgeNone, keel::max(1.0, swLw));
+            }
+            addText(out, ax.legendLabels[k], lx + padX + swatchW + gap,
+                    ry + lgCapH * 0.36, lgFS, kTextCol, false, false, fam);
         }
     }
 }
 
-// Full figure → display list. Subplot grid tiling; single axes uses the
-// whole canvas.
+// Full figure → display list. Uses normalized Axes.Position when available
+// (supporting arbitrary spanning subplots like subplot(2,2,[3,4])), with
+// grid-tiling fallback for legacy FigureState objects without Position.
 inline keel::Array<Cmd> renderFigureDisplay(const FigureState &fig, keel::i32 W,
                                             keel::i32 H)
 {
     keel::Array<Cmd> out;
-    keel::i32 rows = keel::max(1, fig.subplotRows);
-    keel::i32 cols = keel::max(1, fig.subplotCols);
-    // Order axes by subplotIndex (1-based reading order) when gridded.
-    keel::Array<const AxesState *> ordered;
-    for (keel::i32 p = 1; p <= rows * cols; ++p)
-        for (const auto &ax : fig.axes)
-            if (ax.subplotIndex == p) {
-                ordered.push_back(&ax);
-                break;
+
+    bool anyHasPosition = false;
+    for (const auto &ax : fig.axes) {
+        if (ax.hasPosition) {
+            anyHasPosition = true;
+            break;
+        }
+    }
+
+    const keel::f64 uiScale = (fig.figWidth > 0.0)
+        ? keel::max(0.75, keel::as<keel::f64>(W) / fig.figWidth)
+        : 1.0;
+    const keel::f64 ptToPx = (fig.figWidth > 0.0)
+        ? (uiScale * (4.0 / 3.0))
+        : 1.0;
+
+    if (anyHasPosition) {
+        keel::f64 topShift = 0.0;
+        if (!fig.superTitle.empty()) {
+            const keel::f64 stFS = 13.0 * ptToPx;
+            const keel::String dec = decodeTexToUtf8(fig.superTitle);
+            const keel::f64 tw = measureTextWidthPx(dec, stFS, true);
+            const keel::f64 stCap = fontCapHeightPx(stFS, true);
+            addText(out, fig.superTitle, keel::as<keel::f64>(W) * 0.5 - tw * 0.5,
+                    12.0 * uiScale + stCap, stFS, Rgb(0x18, 0x18, 0x18), false, true);
+            topShift = 22.0 * uiScale;
+        }
+        for (const auto &ax : fig.axes) {
+            Rect plot;
+            if (ax.hasPosition) {
+                plot.x0 = ax.posLeft * keel::as<keel::f64>(W);
+                plot.x1 = (ax.posLeft + ax.posWidth) * keel::as<keel::f64>(W);
+                plot.y0 = (1.0 - ax.posBottom - ax.posHeight) * keel::as<keel::f64>(H);
+                plot.y1 = (1.0 - ax.posBottom) * keel::as<keel::f64>(H);
+                if (topShift > 0.0) {
+                    const keel::f64 usableH = keel::max(1.0, keel::as<keel::f64>(H) - topShift);
+                    const keel::f64 scaleY = usableH / keel::as<keel::f64>(H);
+                    plot.y0 = topShift + plot.y0 * scaleY;
+                    plot.y1 = topShift + plot.y1 * scaleY;
+                }
+                renderAxes(fig, ax, plot, out, /*directPlotRect=*/true, uiScale, ptToPx);
+            } else {
+                plot = Rect{10.0, 10.0 + topShift,
+                            keel::as<keel::f64>(W) - 10.0, keel::as<keel::f64>(H) - 10.0};
+                renderAxes(fig, ax, plot, out, /*directPlotRect=*/false, uiScale, ptToPx);
             }
-    if (ordered.empty())
-        for (const auto &ax : fig.axes)
-            ordered.push_back(&ax);
-    for (keel::usize i = 0; i < ordered.size(); ++i) {
-        keel::i32 r = rows > 1 || cols > 1 ? (keel::i32)i / cols : 0;
-        keel::i32 c = rows > 1 || cols > 1 ? (keel::i32)i % cols : 0;
-        Rect box;
-        box.x0 = 10 + c * (W - 20.0) / cols + 6;
-        box.x1 = 10 + (c + 1) * (W - 20.0) / cols - 6;
-        box.y0 = 10 + r * (H - 20.0) / rows + 6;
-        box.y1 = 10 + (r + 1) * (H - 20.0) / rows - 6;
-        if (fig.subplotRows == 0) {
-            box = Rect{10, 10, (keel::f64)W - 10, (keel::f64)H - 10};
         }
-        if (!fig.superTitle.empty() && r == 0 && c == (cols - 1) / 2) {
-            addText(out, fig.superTitle,
-                    W / 2.0 - 3.4 * fig.superTitle.size(), 6, 13,
-                    Rgb(0x28, 0x28, 0x30));
-            box.y0 += 10;
+    } else {
+        keel::i32 rows = keel::max(1, fig.subplotRows);
+        keel::i32 cols = keel::max(1, fig.subplotCols);
+        keel::Array<const AxesState *> ordered;
+        for (keel::i32 p = 1; p <= rows * cols; ++p)
+            for (const auto &ax : fig.axes)
+                if (ax.subplotIndex == p) {
+                    ordered.push_back(&ax);
+                    break;
+                }
+        if (ordered.empty())
+            for (const auto &ax : fig.axes)
+                ordered.push_back(&ax);
+        for (keel::usize i = 0; i < ordered.size(); ++i) {
+            keel::i32 r = rows > 1 || cols > 1 ? (keel::i32)i / cols : 0;
+            keel::i32 c = rows > 1 || cols > 1 ? (keel::i32)i % cols : 0;
+            Rect box;
+            box.x0 = 10 + c * (W - 20.0) / cols + 6;
+            box.x1 = 10 + (c + 1) * (W - 20.0) / cols - 6;
+            box.y0 = 10 + r * (H - 20.0) / rows + 6;
+            box.y1 = 10 + (r + 1) * (H - 20.0) / rows - 6;
+            if (fig.subplotRows == 0) {
+                box = Rect{10, 10, (keel::f64)W - 10, (keel::f64)H - 10};
+            }
+            if (!fig.superTitle.empty() && r == 0 && c == (cols - 1) / 2) {
+                const keel::String dec = decodeTexToUtf8(fig.superTitle);
+                const keel::f64 tw = measureTextWidthPx(dec, 13.0, true);
+                addText(out, fig.superTitle, W / 2.0 - tw * 0.5, 16.0, 13.0,
+                        Rgb(0x28, 0x28, 0x30), false, true);
+                box.y0 += 14;
+            }
+            renderAxes(fig, *ordered[i], box, out, /*directPlotRect=*/false, 1.0, 1.0);
         }
-        renderAxes(fig, *ordered[i], box, out);
     }
     // ── Figure-level annotations (portion 41): normalized [0,1] figure
     // units mapped straight onto the canvas. MATLAB defaults: Color
@@ -2119,12 +2674,13 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
                              const SvgImageEmbedder &embed)
 {
     keel::Array<Cmd> cmds = renderFigureDisplay(fig, W, H);
+    const keel::StringRef bgFill = fig.bgColorHex.empty() ? keel::StringRef("white") : fig.bgColorHex.as_ref();
     keel::String s = keel::format(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" "
         "viewBox=\"0 0 {} {}\">\n"
-        "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n",
-        W, H, W, H);
+        "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>\n",
+        W, H, W, H, bgFill);
     auto esc = [](keel::StringRef t) {
         keel::String o;
         o.reserve(t.size());
@@ -2168,7 +2724,7 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
             s.append("\" font-size=\"");
             appendF(s, c.fontSize);
             s.append("\" font-family=\"");
-            s.append(c.fontFamily.empty() ? keel::StringRef("monospace") : c.fontFamily.as_ref());
+            s.append(c.fontFamily.empty() ? keel::StringRef("sans-serif") : c.fontFamily.as_ref());
             s.push_back('"');
             if (c.bold)
                 s.append(" font-weight=\"bold\"");
@@ -2186,16 +2742,18 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
             s.append(esc(c.text));
             s.append("</text>\n");
         } else if (c.kind == Cmd::MARK) {
-            keel::f64 r = c.width / 2;
-            keel::String colHex = c.color.hex();
+            const keel::f64 r = c.width / 2.0;
+            const keel::String colHex = c.color.hex();
+            const keel::String fillHex = c.fill ? c.fillColor.hex() : keel::String::from("none");
+            const keel::StringRef strokeStr = c.noEdge ? keel::StringRef("none") : colHex.as_ref();
             if (c.text == "s" || c.text == "d") {
                 s.append("<rect x=\""); appendF(s, c.x - r);
                 s.append("\" y=\""); appendF(s, c.y - r);
                 s.append("\" width=\""); appendF(s, c.width);
                 s.append("\" height=\""); appendF(s, c.width);
-                s.append("\" fill=\"");
-                s.append(c.text == "d" ? keel::StringRef("none") : colHex.as_ref());
-                s.append("\" stroke=\""); s.append(colHex);
+                s.append("\" fill=\""); s.append(fillHex);
+                s.append("\" stroke=\""); s.append(strokeStr);
+                s.append("\" stroke-width=\""); appendF(s, c.strokeWidth);
                 s.append("\"/>\n");
             } else if (c.text == "+" || c.text == "x") {
                 s.append("<path d=\"M"); appendF(s, c.x - r);
@@ -2217,13 +2775,16 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
                     s.push_back(' '); appendF(s, c.y + r);
                 }
                 s.append("\" stroke=\""); s.append(colHex);
-                s.append("\" stroke-width=\"1.2\" fill=\"none\"/>\n");
+                s.append("\" stroke-width=\""); appendF(s, c.strokeWidth);
+                s.append("\" fill=\"none\"/>\n");
             } else {   // o . * ^ v < > p h → circle
                 s.append("<circle cx=\""); appendF(s, c.x);
                 s.append("\" cy=\""); appendF(s, c.y);
                 s.append("\" r=\""); appendF(s, r);
-                s.append("\" fill=\"none\" stroke=\""); s.append(colHex);
-                s.append("\" stroke-width=\"1.4\"/>\n");
+                s.append("\" fill=\""); s.append(fillHex);
+                s.append("\" stroke=\""); s.append(strokeStr);
+                s.append("\" stroke-width=\""); appendF(s, c.strokeWidth);
+                s.append("\"/>\n");
             }
         } else {
             // LINE / POLY → <polyline>/<polygon>
@@ -2242,8 +2803,14 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
                 s.append("\" fill=\"none\" stroke=\""); s.append(c.color.hex());
                 s.append("\" stroke-width=\""); appendF(s, c.width);
                 s.push_back('"');
-                if (c.dash)
-                    s.append(" stroke-dasharray=\"7 5\"");
+                if (c.linePattern == 1u)
+                    s.append(" stroke-dasharray=\"10 6\"");
+                else if (c.linePattern == 2u)
+                    s.append(" stroke-dasharray=\"2 4\"");
+                else if (c.linePattern == 3u)
+                    s.append(" stroke-dasharray=\"10 4 2 4\"");
+                else if (c.dash)
+                    s.append(" stroke-dasharray=\"10 6\"");
                 s.append("/>\n");
             }
         }
@@ -2434,46 +3001,118 @@ inline const keel::u8 *font5x7(char c)
 class Raster
 {
 public:
-    Raster(keel::i32 w, keel::i32 h) : w_(w), h_(h)
+    Raster(keel::i32 w, keel::i32 h, Rgb bg = Rgb(255, 255, 255)) : w_(w), h_(h)
     {
-        px_.resize(keel::as<keel::usize>(w) * keel::as<keel::usize>(h) * 3, 255);
+        const keel::usize n = keel::as<keel::usize>(w) * keel::as<keel::usize>(h);
+        px_.resize(n * 3u, 255u);
+        if (bg.r != 255u || bg.g != 255u || bg.b != 255u) {
+            for (keel::usize i = 0; i < n; ++i) {
+                px_[i * 3u] = bg.r;
+                px_[i * 3u + 1u] = bg.g;
+                px_[i * 3u + 2u] = bg.b;
+            }
+        }
     }
 
     void px(keel::i32 x, keel::i32 y, Rgb c)
     {
         if (x < 0 || y < 0 || x >= w_ || y >= h_)
             return;
-        keel::usize o = (keel::usize)(y * w_ + x) * 3;
+        keel::usize o = (keel::usize)(y * w_ + x) * 3u;
         px_[o] = c.r;
-        px_[o + 1] = c.g;
-        px_[o + 2] = c.b;
+        px_[o + 1u] = c.g;
+        px_[o + 2u] = c.b;
     }
 
-    // Thick-ish Bresenham with optional dashing (7 on / 5 off).
-    void line(keel::f64 x0, keel::f64 y0, keel::f64 x1, keel::f64 y1, Rgb c, keel::f64 wd,
-              bool dash)
+    void blendPx(keel::i32 x, keel::i32 y, Rgb c, keel::u8 alpha)
     {
-        keel::f64 len = keel::hypot(x1 - x0, y1 - y0);
+        if (x < 0 || y < 0 || x >= w_ || y >= h_ || alpha == 0u)
+            return;
+        keel::usize o = (keel::usize)(y * w_ + x) * 3u;
+        if (alpha == 255u) {
+            px_[o] = c.r;
+            px_[o + 1u] = c.g;
+            px_[o + 2u] = c.b;
+            return;
+        }
+        const keel::u32 a = alpha;
+        const keel::u32 inv = 255u - a;
+        px_[o]      = keel::as<keel::u8>((keel::as<keel::u32>(c.r) * a + keel::as<keel::u32>(px_[o])      * inv + 127u) / 255u);
+        px_[o + 1u] = keel::as<keel::u8>((keel::as<keel::u32>(c.g) * a + keel::as<keel::u32>(px_[o + 1u]) * inv + 127u) / 255u);
+        px_[o + 2u] = keel::as<keel::u8>((keel::as<keel::u32>(c.b) * a + keel::as<keel::u32>(px_[o + 2u]) * inv + 127u) / 255u);
+    }
+
+    static bool patternOn(keel::u8 pat, keel::f64 dist, keel::f64 scale)
+    {
+        if (pat == 0u) return true;
+        if (pat == 1u) {
+            const keel::f64 on = 9.0 * scale;
+            const keel::f64 off = 5.5 * scale;
+            return keel::fmod(dist, on + off) <= on;
+        }
+        if (pat == 2u) {
+            const keel::f64 on = 1.8 * scale;
+            const keel::f64 off = 3.6 * scale;
+            return keel::fmod(dist, on + off) <= on;
+        }
+        const keel::f64 on1 = 9.0 * scale;
+        const keel::f64 off1 = 3.5 * scale;
+        const keel::f64 on2 = 2.0 * scale;
+        const keel::f64 off2 = 3.5 * scale;
+        const keel::f64 m = keel::fmod(dist, on1 + off1 + on2 + off2);
+        return m <= on1 || (m >= on1 + off1 && m <= on1 + off1 + on2);
+    }
+
+    // Anti-aliased line segment with continuous polyline dash/dot/dashdot phase.
+    void lineSegment(keel::f64 x0, keel::f64 y0, keel::f64 x1, keel::f64 y1,
+                     Rgb c, keel::f64 wd, keel::u8 pattern, keel::f64 &dashPhase)
+    {
+        const keel::f64 dx = x1 - x0;
+        const keel::f64 dy = y1 - y0;
+        const keel::f64 len2 = dx * dx + dy * dy;
+        const keel::f64 len = keel::sqrt(len2);
         if (len < 1e-9)
             return;
-        keel::i32 steps = (keel::i32)keel::ceil(len * 2);
-        keel::f64 dashOn = 7, dashOff = 5;
-        keel::f64 run = 0;
-        keel::i32 side = (keel::i32)keel::max(1.0, keel::round(wd));
-        for (keel::i32 i = 0; i <= steps; ++i) {
-            keel::f64 t = (keel::f64)i / steps;
-            keel::f64 x = x0 + (x1 - x0) * t;
-            keel::f64 y = y0 + (y1 - y0) * t;
-            if (dash) {
-                keel::f64 m = keel::fmod(run, dashOn + dashOff);
-                run += len / steps;
-                if (m > dashOn)
+
+        const keel::f64 halfW = keel::max(0.45, wd * 0.5);
+        const keel::f64 patScale = keel::max(1.0, wd * 0.55);
+        const keel::f64 pad = halfW + 1.5;
+
+        const keel::i32 minX = keel::max(0, (keel::i32)keel::floor(keel::min(x0, x1) - pad));
+        const keel::i32 maxX = keel::min(w_ - 1, (keel::i32)keel::ceil(keel::max(x0, x1) + pad));
+        const keel::i32 minY = keel::max(0, (keel::i32)keel::floor(keel::min(y0, y1) - pad));
+        const keel::i32 maxY = keel::min(h_ - 1, (keel::i32)keel::ceil(keel::max(y0, y1) + pad));
+
+        const keel::f64 invLen2 = 1.0 / len2;
+        for (keel::i32 py = minY; py <= maxY; ++py) {
+            const keel::f64 cy = keel::as<keel::f64>(py) + 0.5;
+            for (keel::i32 pxI = minX; pxI <= maxX; ++pxI) {
+                const keel::f64 cx = keel::as<keel::f64>(pxI) + 0.5;
+                keel::f64 t = ((cx - x0) * dx + (cy - y0) * dy) * invLen2;
+                if (t < 0.0) t = 0.0;
+                else if (t > 1.0) t = 1.0;
+                const keel::f64 qx = x0 + t * dx;
+                const keel::f64 qy = y0 + t * dy;
+                const keel::f64 dist = keel::hypot(cx - qx, cy - qy);
+                const keel::f64 cov = halfW + 0.5 - dist;
+                if (cov <= 0.0)
                     continue;
+                if (pattern != 0u && !patternOn(pattern, dashPhase + t * len, patScale))
+                    continue;
+                const keel::f64 a = cov >= 1.0 ? 1.0 : cov;
+                blendPx(pxI, py, c, keel::as<keel::u8>(keel::round_i64(a * 255.0)));
             }
-            for (keel::i32 dx = 0; dx < side; ++dx)
-                for (keel::i32 dy = 0; dy < side; ++dy)
-                    px((keel::i32)x + dx - side / 2, (keel::i32)y + dy - side / 2, c);
         }
+        dashPhase += len;
+    }
+
+    void polyline(keel::ArrayRef<keel::f64> xs, keel::ArrayRef<keel::f64> ys,
+                  Rgb c, keel::f64 wd, keel::u8 pattern)
+    {
+        const keel::usize n = keel::min(xs.size(), ys.size());
+        keel::f64 dashPhase = 0.0;
+        for (keel::usize i = 0; i + 1 < n; ++i)
+            lineSegment(xs[i], ys[i], xs[i + 1], ys[i + 1], c, wd, pattern, dashPhase);
     }
 
     void polygon(keel::ArrayRef<keel::f64> xs, keel::ArrayRef<keel::f64> ys,
@@ -2482,7 +3121,6 @@ public:
         if (xs.size() < 2)
             return;
         if (fill) {
-            // Scanline fill (even-odd).
             keel::f64 ymn = ys[0], ymx = ys[0];
             for (keel::f64 y : ys) {
                 ymn = keel::min(ymn, y);
@@ -2504,52 +3142,159 @@ public:
                         px(x, y, c);
             }
         } else {
+            keel::f64 phase = 0.0;
             for (keel::usize i = 0; i + 1 < xs.size(); ++i)
-                line(xs[i], ys[i], xs[i + 1], ys[i + 1], c, 1, false);
-            line(xs.back(), ys.back(), xs.front(), ys.front(), c, 1, false);
+                lineSegment(xs[i], ys[i], xs[i + 1], ys[i + 1], c, 1.0, 0u, phase);
+            lineSegment(xs.back(), ys.back(), xs.front(), ys.front(), c, 1.0, 0u, phase);
         }
     }
 
-    void marker(keel::f64 x, keel::f64 y, keel::f64 size, Rgb c, keel::StringRef k)
+    void marker(keel::f64 x, keel::f64 y, keel::f64 size, Rgb edgeColor,
+                keel::StringRef k, bool hasFill, Rgb fillColor, bool noEdge,
+                keel::f64 strokeW)
     {
-        keel::i32 r = (keel::i32)keel::max(2.0, size / 2);
+        const keel::f64 r = keel::max(2.0, size * 0.5);
+        const keel::f64 sw = keel::max(1.0, strokeW);
         if (k == "s") {
-            for (keel::i32 dy = -r; dy <= r; ++dy)
-                for (keel::i32 dx = -r; dx <= r; ++dx)
-                    px((keel::i32)x + dx, (keel::i32)y + dy, c);
+            const keel::i32 x0 = (keel::i32)keel::round_i64(x - r);
+            const keel::i32 x1 = (keel::i32)keel::round_i64(x + r);
+            const keel::i32 y0 = (keel::i32)keel::round_i64(y - r);
+            const keel::i32 y1 = (keel::i32)keel::round_i64(y + r);
+            if (hasFill) {
+                for (keel::i32 py = y0; py <= y1; ++py)
+                    for (keel::i32 pxI = x0; pxI <= x1; ++pxI)
+                        px(pxI, py, fillColor);
+            }
+            if (!noEdge) {
+                keel::f64 ph = 0.0;
+                lineSegment(x - r, y - r, x + r, y - r, edgeColor, sw, 0u, ph);
+                lineSegment(x + r, y - r, x + r, y + r, edgeColor, sw, 0u, ph);
+                lineSegment(x + r, y + r, x - r, y + r, edgeColor, sw, 0u, ph);
+                lineSegment(x - r, y + r, x - r, y - r, edgeColor, sw, 0u, ph);
+            }
         } else if (k == "+" || k == "x") {
-            for (keel::i32 d = -r; d <= r; ++d) {
-                px((keel::i32)x + d, (keel::i32)y, c);
-                px((keel::i32)x, (keel::i32)y + d, c);
-                if (k == "x") {
-                    px((keel::i32)x + d, (keel::i32)y + d, c);
-                    px((keel::i32)x + d, (keel::i32)y - d, c);
+            keel::f64 ph = 0.0;
+            if (k == "+") {
+                lineSegment(x - r, y, x + r, y, edgeColor, sw, 0u, ph);
+                lineSegment(x, y - r, x, y + r, edgeColor, sw, 0u, ph);
+            } else {
+                lineSegment(x - r, y - r, x + r, y + r, edgeColor, sw, 0u, ph);
+                lineSegment(x + r, y - r, x - r, y + r, edgeColor, sw, 0u, ph);
+            }
+        } else {   // o . * ^ v < > p h → anti-aliased circle (optional fill + ring)
+            const keel::f64 halfStroke = sw * 0.5;
+            const keel::f64 outer = r + halfStroke + 1.5;
+            const keel::i32 minX = keel::max(0, (keel::i32)keel::floor(x - outer));
+            const keel::i32 maxX = keel::min(w_ - 1, (keel::i32)keel::ceil(x + outer));
+            const keel::i32 minY = keel::max(0, (keel::i32)keel::floor(y - outer));
+            const keel::i32 maxY = keel::min(h_ - 1, (keel::i32)keel::ceil(y + outer));
+            for (keel::i32 py = minY; py <= maxY; ++py) {
+                const keel::f64 cy = keel::as<keel::f64>(py) + 0.5;
+                for (keel::i32 pxI = minX; pxI <= maxX; ++pxI) {
+                    const keel::f64 cx = keel::as<keel::f64>(pxI) + 0.5;
+                    const keel::f64 d = keel::hypot(cx - x, cy - y);
+                    if (hasFill) {
+                        const keel::f64 fcov = r + 0.5 - d;
+                        if (fcov > 0.0) {
+                            const keel::f64 a = fcov >= 1.0 ? 1.0 : fcov;
+                            blendPx(pxI, py, fillColor, keel::as<keel::u8>(keel::round_i64(a * 255.0)));
+                        }
+                    }
+                    if (!noEdge) {
+                        const keel::f64 ecov = halfStroke + 0.5 - keel::abs(d - r);
+                        if (ecov > 0.0) {
+                            const keel::f64 a = ecov >= 1.0 ? 1.0 : ecov;
+                            blendPx(pxI, py, edgeColor, keel::as<keel::u8>(keel::round_i64(a * 255.0)));
+                        }
+                    }
                 }
             }
-        } else {   // o . * ^ v < > p h → outline circle (+ rays for *)
-            for (keel::i32 a = 0; a < 360; a += 2) {
-                keel::f64 rad = a * keel::kPi / 180.0;
-                px((keel::i32)keel::round_i64(x + r * keel::cos(rad)),
-                   (keel::i32)keel::round_i64(y + r * keel::sin(rad)), c);
+            if (k == "*") {
+                keel::f64 ph = 0.0;
+                lineSegment(x - r, y, x + r, y, edgeColor, sw, 0u, ph);
+                lineSegment(x, y - r, x, y + r, edgeColor, sw, 0u, ph);
+                const keel::f64 d2 = r * 0.707;
+                lineSegment(x - d2, y - d2, x + d2, y + d2, edgeColor, sw, 0u, ph);
+                lineSegment(x + d2, y - d2, x - d2, y + d2, edgeColor, sw, 0u, ph);
             }
-            if (k == "*")
-                for (keel::i32 d = -r - 1; d <= r + 1; ++d) {
-                    px((keel::i32)x + d, (keel::i32)y, c);
-                    px((keel::i32)x, (keel::i32)y + d, c);
-                    px((keel::i32)x + d, (keel::i32)y + d, c);
-                    px((keel::i32)x + d, (keel::i32)y - d, c);
-                }
         }
     }
 
-    // Monospace text, scale = fontSize / 7 (glyph 5×7 + 1 col spacing).
-    // rot90 renders the run bottom-to-top (ylabel).
+    // Anti-aliased TrueType text via keel::font (UTF-8, baseline-anchored at (x, y),
+    // with 90-deg CCW rotation matching SVG rotate(-90 x y)). Falls back to built-in
+    // 5x7 bitmap glyphs when no system TrueType font is installed.
     void text(keel::f64 x, keel::f64 y, keel::StringRef s, keel::f64 fontSize, Rgb c,
-              bool rot90)
+              bool rot90, bool bold)
     {
+        bool synthBold = false;
+        const keel::font::FontFace *face = getPlotFontFace(bold, synthBold);
+        if (face) {
+            const keel::f32 sz = keel::as<keel::f32>(keel::max(4.0, fontSize));
+            keel::font::RasterOptions opts;
+            opts.hinting = keel::font::Hinting::Light;
+            opts.syntheticBold = synthBold;
+            keel::font::RasterScratch scratch;
+            keel::font::GlyphBitmap bm;
+
+            keel::f64 pen = 0.0;
+            keel::u32 prevGid = 0;
+            bool hasPrev = false;
+            keel::usize off = 0;
+            const keel::i32 originX = (keel::i32)keel::round_i64(x);
+            const keel::i32 originY = (keel::i32)keel::round_i64(y);
+
+            while (off < s.size()) {
+                const keel::u32 cp = keel::utf8_decode_next(s, off);
+                const keel::u32 gid = face->glyph_index(cp);
+                if (hasPrev)
+                    pen += keel::as<keel::f64>(face->kerning_px(prevGid, gid, sz, opts.hinting));
+
+                if (face->rasterize(gid, sz, opts, bm, &scratch)) {
+                    if (!bm.empty && bm.width > 0 && bm.height > 0) {
+                        const keel::i32 penI = (keel::i32)keel::round_i64(pen);
+                        if (!rot90) {
+                            const keel::i32 dstX0 = originX + penI + bm.bearingX;
+                            const keel::i32 dstY0 = originY - bm.bearingY;
+                            for (keel::u16 row = 0; row < bm.height; ++row) {
+                                const keel::usize rowOff = keel::as<keel::usize>(row) * bm.strideBytes;
+                                for (keel::u16 col = 0; col < bm.width; ++col) {
+                                    const keel::u8 cov = bm.pixels[rowOff + col];
+                                    if (cov != 0u)
+                                        blendPx(dstX0 + col, dstY0 + row, c, cov);
+                                }
+                            }
+                        } else {
+                            // 90-deg CCW rotation around baseline origin (x, y):
+                            // local (u, v) -> screen (x + v, y - u).
+                            for (keel::u16 row = 0; row < bm.height; ++row) {
+                                const keel::i32 v = -bm.bearingY + keel::as<keel::i32>(row);
+                                const keel::i32 sx = originX + v;
+                                const keel::usize rowOff = keel::as<keel::usize>(row) * bm.strideBytes;
+                                for (keel::u16 col = 0; col < bm.width; ++col) {
+                                    const keel::u8 cov = bm.pixels[rowOff + col];
+                                    if (cov != 0u) {
+                                        const keel::i32 u = penI + bm.bearingX + keel::as<keel::i32>(col);
+                                        blendPx(sx, originY - u, c, cov);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    pen += keel::as<keel::f64>(bm.advancePx);
+                } else {
+                    pen += keel::as<keel::f64>(face->advance_width_px(gid, sz, opts.hinting, synthBold));
+                }
+                prevGid = gid;
+                hasPrev = true;
+            }
+            return;
+        }
+
+        // Fallback built-in 5x7 ASCII bitmap font (adjusted for baseline-anchored y).
         keel::i32 scale = keel::max(1, (keel::i32)keel::round_i64(fontSize / 7.0));
         if (!rot90) {
             keel::f64 cx = x;
+            const keel::i32 topY = (keel::i32)keel::round_i64(y) - 7 * scale;
             for (char ch : s) {
                 const keel::u8 *g = font5x7(ch);
                 for (keel::i32 col = 0; col < 5; ++col)
@@ -2558,12 +3303,10 @@ public:
                             for (keel::i32 sx = 0; sx < scale; ++sx)
                                 for (keel::i32 sy = 0; sy < scale; ++sy)
                                     px((keel::i32)cx + col * scale + sx,
-                                       (keel::i32)y + row * scale + sy, c);
+                                       topY + row * scale + sy, c);
                 cx += 6 * scale;
             }
         } else {
-            // Glyph columns run UPWARD from (x,y); within a glyph rows
-            // go left→right after rotation.
             keel::f64 cy = y;
             for (keel::usize i = s.size(); i-- > 0;) {
                 const keel::u8 *g = font5x7(s[i]);
@@ -2572,7 +3315,7 @@ public:
                         if (g[col] & (1 << row))
                             for (keel::i32 sx = 0; sx < scale; ++sx)
                                 for (keel::i32 sy = 0; sy < scale; ++sy)
-                                    px((keel::i32)x + (6 - row) * scale + sx,
+                                    px((keel::i32)x - (7 - row) * scale + sx,
                                        (keel::i32)cy - (5 - col) * scale - sy, c);
                 cy -= 6 * scale;
             }
@@ -2615,24 +3358,21 @@ private:
 keel::Array<keel::u8> renderFigureRgb(const FigureState &fig,
                                       keel::i32 W, keel::i32 H)
 {
-    Raster r(W, H);
+    const Rgb bg = fig.bgColorHex.empty() ? Rgb(255, 255, 255) : Rgb::fromHex(fig.bgColorHex);
+    Raster r(W, H, bg);
     for (const Cmd &c : renderFigureDisplay(fig, W, H)) {
         switch (c.kind) {
         case Cmd::TEXT:
-            r.text(c.x, c.y, c.text, c.fontSize, c.color, c.rot90);
-            if (c.bold)   // fake bold: second strike one pixel over
-                r.text(c.x + 1, c.y, c.text, c.fontSize, c.color, c.rot90);
+            r.text(c.x, c.y, c.text, c.fontSize, c.color, c.rot90, c.bold);
             break;
         case Cmd::MARK:
-            r.marker(c.x, c.y, c.width, c.color, c.text);
+            r.marker(c.x, c.y, c.width, c.color, c.text, c.fill, c.fillColor, c.noEdge, c.strokeWidth);
             break;
         case Cmd::POLY:
             r.polygon(c.xs, c.ys, c.color, c.fill);
             break;
         case Cmd::LINE:
-            for (keel::usize i = 0; i + 1 < c.xs.size(); ++i)
-                r.line(c.xs[i], c.ys[i], c.xs[i + 1], c.ys[i + 1], c.color,
-                       c.width, c.dash);
+            r.polyline(c.xs, c.ys, c.color, c.width, c.linePattern != 0u ? c.linePattern : (c.dash ? 1u : 0u));
             break;
         case Cmd::IMAGE: {
             keel::Array<keel::u8> buf = imageCmdRgb(c);

@@ -240,10 +240,12 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
     const FigureState *targetFig = ea.resolvedFigure();
     if (!targetFig)
         throw numkit::Error(keel::format("{}: no figure to export", who).c_str());
-    // Base canvas 840×630 (MATLAB's 560×420 pt @150dpi ≈ 825×619);
-    // Resolution scales it linearly.
-    const keel::i32 W = keel::max(64, (keel::i32)(840.0 * ea.dpi / 150.0));
-    const keel::i32 H = keel::max(64, (keel::i32)(630.0 * ea.dpi / 150.0));
+    // Base canvas scales from Figure.Position (default 560×420 → 840×630 @150dpi;
+    // custom Position e.g. 1280×760 scales proportionally with dpi/100).
+    const keel::f64 figW = (targetFig->figWidth > 0.0) ? targetFig->figWidth : 560.0;
+    const keel::f64 figH = (targetFig->figHeight > 0.0) ? targetFig->figHeight : 420.0;
+    const keel::i32 W = keel::max(64, (keel::i32)keel::round_i64(figW * ea.dpi / 100.0));
+    const keel::i32 H = keel::max(64, (keel::i32)keel::round_i64(figH * ea.dpi / 100.0));
 
     auto rp = engine.resolvePath(ea.path);
     if (!rp.fs)

@@ -108,6 +108,7 @@ DatasetInfo DatasetInfo::clone(keel::Allocator *alloc) const
     cp.lineWidth = lineWidth;
     cp.markerSize = markerSize;
     cp.visible = visible;
+    cp.handleVisible = handleVisible;
     cp.yside = yside.clone(alloc);
     cp.eJson = eJson.clone(alloc);
     cp.eNegJson = eNegJson.clone(alloc);
@@ -213,6 +214,11 @@ AxesState AxesState::clone(keel::Allocator *alloc) const
     cp.subplotIndex = subplotIndex;
     cp.subplotRows = subplotRows;
     cp.subplotCols = subplotCols;
+    cp.hasPosition = hasPosition;
+    cp.posLeft = posLeft;
+    cp.posBottom = posBottom;
+    cp.posWidth = posWidth;
+    cp.posHeight = posHeight;
     return cp;
 }
 
@@ -223,6 +229,9 @@ FigureState FigureState::clone(keel::Allocator *alloc) const
     cp.modified = modified;
     cp.subplotRows = subplotRows;
     cp.subplotCols = subplotCols;
+    cp.figWidth = figWidth;
+    cp.figHeight = figHeight;
+    cp.bgColorHex = bgColorHex.clone(alloc);
     cp.axes = axes.clone(alloc);
     cp.currentAxes = currentAxes;
     cp.linkMode = linkMode.clone(alloc);

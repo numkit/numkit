@@ -12,6 +12,7 @@
 #include <keel/core.h>
 #include <keel/format.h>
 #include <keel/fs.h>
+#include <keel/io.h>
 #include <keel/os_signal.h>
 #include <keel/process.h>
 #include <keel/ref.h>
@@ -132,9 +133,26 @@ void reportError(const Engine::EvalResult &r, keel::StringRef prefix)
     }
 }
 
+void installCliOutputHandler(Engine &engine, bool interactive)
+{
+    const bool tty = interactive && keel::is_tty(keel::StdStream::Stdout);
+    engine.setOutputFunc([tty](keel::StringRef text) {
+        if (text == "__CLEAR__\n" || text == "__CLEAR__") {
+            if (tty) {
+                keel::stdout_write("\033[2J\033[H");
+                keel::stdout_flush();
+            }
+            return;
+        }
+        keel::stdout_write(text);
+        keel::stdout_flush();
+    });
+}
+
 int runEval(keel::StringRef code)
 {
     StandardEngine engine;
+    installCliOutputHandler(engine, false);
     SignalInterruptGuard sigGuard(engine);
     {
         auto cwd = keel::fs_current_dir();
@@ -154,6 +172,7 @@ int runEval(keel::StringRef code)
 int runScript(keel::StringRef path)
 {
     StandardEngine engine;
+    installCliOutputHandler(engine, false);
     SignalInterruptGuard sigGuard(engine);
     auto textRes = keel::fs_read_text(path);
     if (!textRes.is_ok()) {
@@ -214,6 +233,7 @@ bool readStdinLine(keel::String &line)
 int runRepl()
 {
     StandardEngine engine;
+    installCliOutputHandler(engine, true);
     SignalInterruptGuard sigGuard(engine);
 
     keel::print("NumKit 1.0.0 (interactive REPL)\n"

@@ -175,6 +175,34 @@ if(NOT TARGET keel::http)
     FetchContent_MakeAvailable(keel_http)
 endif()
 
+# ── Dependency: keel::font ───────────────────────────────────────────────
+if(NOT TARGET keel::font)
+    find_package(keel_font QUIET CONFIG)
+    if(TARGET keel::keel_font AND NOT TARGET keel::font)
+        add_library(keel::font ALIAS keel::keel_font)
+    endif()
+endif()
+if(NOT TARGET keel::font)
+    if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_KEEL_FONT)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/font/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_FONT
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../keelcpp/font"
+                CACHE PATH "")
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/font/CMakeLists.txt")
+            set(FETCHCONTENT_SOURCE_DIR_KEEL_FONT
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../keelcpp/font"
+                CACHE PATH "")
+        endif()
+    endif()
+    set(KEEL_FONT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        keel_font
+        GIT_REPOSITORY https://github.com/keelcpp/font.git
+        GIT_TAG        23c43fb8a0d5eb3d15227d46dac735340c9af273
+    )
+    FetchContent_MakeAvailable(keel_font)
+endif()
+
 # ── Gather Sources ───────────────────────────────────────────────────────
 file(GLOB_RECURSE NUMKIT_SOURCES CONFIGURE_DEPENDS
     "src/core/*.cpp"
@@ -219,6 +247,7 @@ target_link_libraries(numkit
         keel::compress
         keel::crypto
         keel::http
+        keel::font
 )
 
 
