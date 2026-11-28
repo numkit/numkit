@@ -615,18 +615,49 @@ void renderCartesianAxes(const RenderAxes &ax, Rect box, bool directPlotRect,
     bool has3d = false;
     computeAxesBounds(ax, tf, has3d);
 
-    if (ax.equalAspect) {
-        const keel::f64 dataAspect = (tf.xr.hi - tf.xr.lo) / (tf.yr.hi - tf.yr.lo);
-        const keel::f64 pxAspect = (tf.plot.x1 - tf.plot.x0) / (tf.plot.y1 - tf.plot.y0);
-        if (dataAspect > 0.0 && pxAspect > 0.0) {
-            if (pxAspect > dataAspect) {
-                const keel::f64 w = (tf.plot.y1 - tf.plot.y0) * dataAspect;
-                const keel::f64 cx = (tf.plot.x0 + tf.plot.x1) * 0.5;
-                tf.plot.x0 = cx - w * 0.5; tf.plot.x1 = cx + w * 0.5;
+    auto shrinkPlotToAspect = [&](keel::f64 targetAspect) {
+        const keel::f64 curW = tf.plot.x1 - tf.plot.x0;
+        const keel::f64 curH = tf.plot.y1 - tf.plot.y0;
+        if (!(targetAspect > 0.0) || !(curW > 0.0) || !(curH > 0.0))
+            return;
+        const keel::f64 pxAspect = curW / curH;
+        if (pxAspect > targetAspect) {
+            const keel::f64 w = curH * targetAspect;
+            const keel::f64 cx = (tf.plot.x0 + tf.plot.x1) * 0.5;
+            tf.plot.x0 = cx - w * 0.5; tf.plot.x1 = cx + w * 0.5;
+        } else {
+            const keel::f64 h = curW / targetAspect;
+            const keel::f64 cy = (tf.plot.y0 + tf.plot.y1) * 0.5;
+            tf.plot.y0 = cy - h * 0.5; tf.plot.y1 = cy + h * 0.5;
+        }
+    };
+
+    if (ax.hasPlotBoxAspectRatio && ax.plotBoxAspectX > 0.0 && ax.plotBoxAspectY > 0.0) {
+        shrinkPlotToAspect(ax.plotBoxAspectX / ax.plotBoxAspectY);
+    } else if (ax.hasDataAspectRatio && ax.dataAspectX > 0.0 && ax.dataAspectY > 0.0
+               && !tf.xr.log && !tf.yr.log) {
+        const keel::f64 darRatio = ax.dataAspectX / ax.dataAspectY;
+        const keel::f64 curW = tf.plot.x1 - tf.plot.x0;
+        const keel::f64 curH = tf.plot.y1 - tf.plot.y0;
+        const keel::f64 dx = tf.xr.hi - tf.xr.lo;
+        const keel::f64 dy = tf.yr.hi - tf.yr.lo;
+        if (curW > 0.0 && curH > 0.0 && dx > 0.0 && dy > 0.0) {
+            if (ax.dataAspectExpandLimits) {
+                const keel::f64 targetDataAspect = darRatio * (curW / curH);
+                const keel::f64 curDataAspect = dx / dy;
+                if (curDataAspect < targetDataAspect * (1.0 - 1e-6)) {
+                    const keel::f64 cx = 0.5 * (tf.xr.lo + tf.xr.hi);
+                    const keel::f64 half = 0.5 * dy * targetDataAspect;
+                    tf.xr.lo = cx - half;
+                    tf.xr.hi = cx + half;
+                } else if (curDataAspect > targetDataAspect * (1.0 + 1e-6)) {
+                    const keel::f64 cy = 0.5 * (tf.yr.lo + tf.yr.hi);
+                    const keel::f64 half = 0.5 * dx / targetDataAspect;
+                    tf.yr.lo = cy - half;
+                    tf.yr.hi = cy + half;
+                }
             } else {
-                const keel::f64 h = (tf.plot.x1 - tf.plot.x0) / dataAspect;
-                const keel::f64 cy = (tf.plot.y0 + tf.plot.y1) * 0.5;
-                tf.plot.y0 = cy - h * 0.5; tf.plot.y1 = cy + h * 0.5;
+                shrinkPlotToAspect((dx / dy) / darRatio);
             }
         }
     }

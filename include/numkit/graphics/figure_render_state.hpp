@@ -177,7 +177,13 @@ struct RenderAxes {
     bool y2Log = false;
     bool xReverse = false;
     bool yReverse = false;
-    bool equalAspect = false;
+    bool hasDataAspectRatio = false;
+    keel::f64 dataAspectX = 1.0;
+    keel::f64 dataAspectY = 1.0;
+    bool dataAspectExpandLimits = false;
+    bool hasPlotBoxAspectRatio = false;
+    keel::f64 plotBoxAspectX = 1.0;
+    keel::f64 plotBoxAspectY = 1.0;
     bool yyEnabled = false;
 
     // Polar configuration

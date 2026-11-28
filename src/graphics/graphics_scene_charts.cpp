@@ -272,15 +272,24 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         return;
     }
 
-    // Check if any visible child is a Bar or Area chart (needs cross-series group/stack bounds).
+    // Pre-scan visible children for class-specific auto-limit rules (bar/area stacking, histogram/quiver bounds).
     bool hasAnyBarOrArea = false;
+    bool hasHistogram = false;
+    bool hasNonHistChart = false;
+    bool hasQuiver = false;
+    bool hasNonQuiverChart = false;
     for (NodeId cid : ax->children) {
         const GraphicsNode *ch = findNode(cid);
-        if (ch && (ch->classId == ClassId::Bar || ch->classId == ClassId::Area)
-            && !asciiEqualNoCase(getProperty(cid, "Visible", res).toString(), "off")) {
+        if (!ch || !isChartClass(ch->classId))
+            continue;
+        if (asciiEqualNoCase(getProperty(cid, "Visible", res).toString(), "off"))
+            continue;
+        if (ch->classId == ClassId::Bar || ch->classId == ClassId::Area)
             hasAnyBarOrArea = true;
-            break;
-        }
+        if (ch->classId == ClassId::Histogram) hasHistogram = true;
+        else hasNonHistChart = true;
+        if (ch->classId == ClassId::Quiver) hasQuiver = true;
+        else hasNonQuiverChart = true;
     }
 
     // Cartesian Axes (incremental scan when new children are appended under hold-on)
@@ -302,8 +311,6 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
     bool hasImage = incremental ? ax->boundsHasImage : false;
     bool hasNonImage = incremental ? ax->boundsHasNonImage : false;
     bool hasNonBarChart = false;
-    bool hasHistogram = false;
-    bool hasNonHistChart = false;
     bool barCatAxisX = false;
     bool barCatAxisY = false;
     keel::Array<NodeId> barNodes(res);
@@ -322,20 +329,16 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
 
         if (ch->classId == ClassId::Bar) {
             hasNonImage = true;
-            hasNonHistChart = true;
             barNodes.push_back(cid);
             continue;
         }
         if (ch->classId == ClassId::Area) {
             hasNonImage = true;
             hasNonBarChart = true;
-            hasNonHistChart = true;
             areaNodes.push_back(cid);
             continue;
         }
         hasNonBarChart = true;
-        if (ch->classId != ClassId::Histogram)
-            hasNonHistChart = true;
 
         if (ch->classId == ClassId::Group) {
             for (NodeId gcid : ch->children) {
@@ -504,16 +507,17 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
                     };
                     const keel::f64 delx = gridSpacing(ux);
                     const keel::f64 dely = gridSpacing(uy);
-                    keel::f64 maxNorm = 0.0;
+                    const keel::f64 delDiag = keel::hypot(delx, dely);
+                    keel::f64 maxLen = 0.0;
                     for (keel::usize k = 0; k < nq; ++k) {
                         const keel::f64 u = ud->elemAsDouble(k);
                         const keel::f64 v = vd->elemAsDouble(k);
                         if (!keel::is_finite(u) || !keel::is_finite(v)) continue;
-                        const keel::f64 nrm = keel::max(keel::abs(u) / delx, keel::abs(v) / dely);
-                        if (nrm > maxNorm) maxNorm = nrm;
+                        const keel::f64 len = keel::hypot(u, v);
+                        if (len > maxLen) maxLen = len;
                     }
-                    if (maxNorm > 1e-12)
-                        qScale = scaleFactor / maxNorm;
+                    if (maxLen > 1e-12)
+                        qScale = (scaleFactor * 0.9 * delDiag) / maxLen;
                 }
                 for (keel::usize k = 0; k < nq; ++k) {
                     const keel::f64 tx = xd->elemAsDouble(k) + ud->elemAsDouble(k) * qScale;
@@ -790,8 +794,79 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
 
     const bool imageOnlyTight = (hasImage && !hasNonImage);
     const bool histOnlyX = (hasHistogram && !hasNonHistChart);
-    applyAxis('x', "XLim", "XLimMode", (imageOnlyTight || barCatAxisX || histOnlyX) ? nullptr : "XLimitMethod", "XScale", xmin, xmax, anyX);
-    applyAxis('y', "YLim", "YLimMode", (imageOnlyTight || barCatAxisY) ? nullptr : "YLimitMethod", "YScale", ymin, ymax, anyY);
+    const bool quiverOnly = (hasQuiver && !hasNonQuiverChart);
+    applyAxis('x', "XLim", "XLimMode", (imageOnlyTight || barCatAxisX || histOnlyX || quiverOnly) ? nullptr : "XLimitMethod", "XScale", xmin, xmax, anyX);
+    applyAxis('y', "YLim", "YLimMode", (imageOnlyTight || barCatAxisY || quiverOnly) ? nullptr : "YLimitMethod", "YScale", ymin, ymax, anyY);
+
+    // When DataAspectRatioMode is 'manual' (e.g. axis equal) with auto non-tight limits
+    // and PlotBoxAspectRatioMode == 'auto', expand the narrower axis limit to fill the
+    // axes Position rectangle at exact data-to-pixel aspect ratio.
+    if (!imageOnlyTight && !isView3D
+        && asciiEqualNoCase(getProperty(axId, "DataAspectRatioMode", res).toString(), "manual")
+        && !asciiEqualNoCase(getProperty(axId, "PlotBoxAspectRatioMode", res).toString(), "manual")
+        && asciiEqualNoCase(getProperty(axId, "XLimMode", res).toString(), "auto")
+        && asciiEqualNoCase(getProperty(axId, "YLimMode", res).toString(), "auto")
+        && !asciiEqualNoCase(getProperty(axId, "XLimitMethod", res).toString(), "tight")
+        && !asciiEqualNoCase(getProperty(axId, "YLimitMethod", res).toString(), "tight")
+        && !asciiEqualNoCase(getProperty(axId, "XScale", res).toString(), "log")
+        && !asciiEqualNoCase(getProperty(axId, "YScale", res).toString(), "log")) {
+        const Value dar = getProperty(axId, "DataAspectRatio", res);
+        const Value curXL = getProperty(axId, "XLim", res);
+        const Value curYL = getProperty(axId, "YLim", res);
+        const Value axPos = getProperty(axId, "Position", res);
+        if (dar.isNumeric() && dar.numel() >= 2 && curXL.isNumeric() && curXL.numel() >= 2
+            && curYL.isNumeric() && curYL.numel() >= 2 && axPos.isNumeric() && axPos.numel() >= 4) {
+            const keel::f64 darX = dar.elemAsDouble(0);
+            const keel::f64 darY = dar.elemAsDouble(1);
+            keel::f64 figW = 560.0, figH = 420.0;
+            NodeId anc = ax->parentId;
+            while (anc != kInvalidNodeId) {
+                const GraphicsNode *an = findNode(anc);
+                if (!an) break;
+                if (an->classId == ClassId::Figure) {
+                    const Value fp = getProperty(anc, "Position", res);
+                    if (fp.isNumeric() && fp.numel() >= 4 && fp.elemAsDouble(2) > 0.0 && fp.elemAsDouble(3) > 0.0) {
+                        figW = fp.elemAsDouble(2);
+                        figH = fp.elemAsDouble(3);
+                    }
+                    break;
+                }
+                anc = an->parentId;
+            }
+            const keel::f64 pxW = figW * axPos.elemAsDouble(2);
+            const keel::f64 pxH = figH * axPos.elemAsDouble(3);
+            const keel::f64 xlo = curXL.elemAsDouble(0), xhi = curXL.elemAsDouble(1);
+            const keel::f64 ylo = curYL.elemAsDouble(0), yhi = curYL.elemAsDouble(1);
+            const keel::f64 dx = xhi - xlo, dy = yhi - ylo;
+            if (darX > 0.0 && darY > 0.0 && pxW > 0.0 && pxH > 0.0 && dx > 0.0 && dy > 0.0) {
+                const keel::f64 targetDataAspect = (darX / darY) * (pxW / pxH);
+                const keel::f64 curDataAspect = dx / dy;
+                if (curDataAspect < targetDataAspect * (1.0 - 1e-6)) {
+                    const keel::f64 cx = 0.5 * (xlo + xhi);
+                    const keel::f64 half = 0.5 * dy * targetDataAspect;
+                    Value lv = Value::matrix(1, 2, ValueType::DOUBLE, res);
+                    lv.doubleDataMut()[0] = cx - half;
+                    lv.doubleDataMut()[1] = cx + half;
+                    ax->props.put(keel::String::from("XLim", mr_), lv);
+                    if (GraphicsNode *rn = findNode(ax->xAxisId))
+                        rn->props.put(keel::String::from("Limits", mr_), lv);
+                    recomputeAutoTicksForAxis(axId, 'x', res);
+                } else if (curDataAspect > targetDataAspect * (1.0 + 1e-6)) {
+                    const keel::f64 cy = 0.5 * (ylo + yhi);
+                    const keel::f64 half = 0.5 * dx / targetDataAspect;
+                    Value lv = Value::matrix(1, 2, ValueType::DOUBLE, res);
+                    lv.doubleDataMut()[0] = cy - half;
+                    lv.doubleDataMut()[1] = cy + half;
+                    ax->props.put(keel::String::from("YLim", mr_), lv);
+                    const NodeId yRid = (ax->yyRightActive && ax->yAxisRightId != kInvalidNodeId)
+                                            ? ax->yAxisRightId : ax->yAxisId;
+                    if (GraphicsNode *rn = findNode(yRid))
+                        rn->props.put(keel::String::from("Limits", mr_), lv);
+                    recomputeAutoTicksForAxis(axId, 'y', res);
+                }
+            }
+        }
+    }
     if (anyZ) {
         applyAxis('z', "ZLim", "ZLimMode", "ZLimitMethod", "ZScale", zmin, zmax, true);
     } else if ((anyX || anyY) && asciiEqualNoCase(getProperty(axId, "ZLimMode", res).toString(), "auto")) {

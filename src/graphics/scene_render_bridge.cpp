@@ -302,8 +302,25 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
         if (asciiEqualNoCase(scene.getProperty(axId, "DataAspectRatioMode", mr).toString(), "manual")) {
             const Value dar = scene.getProperty(axId, "DataAspectRatio", mr);
             if (dar.isNumeric() && dar.numel() >= 2
-                && keel::abs(dar.elemAsDouble(0) - dar.elemAsDouble(1)) < 1e-9) {
-                dst.equalAspect = true;
+                && dar.elemAsDouble(0) > 0.0 && dar.elemAsDouble(1) > 0.0) {
+                dst.hasDataAspectRatio = true;
+                dst.dataAspectX = dar.elemAsDouble(0);
+                dst.dataAspectY = dar.elemAsDouble(1);
+                const bool limAuto = asciiEqualNoCase(scene.getProperty(axId, "XLimMode", mr).toString(), "auto")
+                    && asciiEqualNoCase(scene.getProperty(axId, "YLimMode", mr).toString(), "auto")
+                    && !asciiEqualNoCase(scene.getProperty(axId, "XLimitMethod", mr).toString(), "tight")
+                    && !asciiEqualNoCase(scene.getProperty(axId, "YLimitMethod", mr).toString(), "tight");
+                const bool imageOnly = ax->boundsHasImage && !ax->boundsHasNonImage;
+                dst.dataAspectExpandLimits = limAuto && !imageOnly;
+            }
+        }
+        if (asciiEqualNoCase(scene.getProperty(axId, "PlotBoxAspectRatioMode", mr).toString(), "manual")) {
+            const Value pbar = scene.getProperty(axId, "PlotBoxAspectRatio", mr);
+            if (pbar.isNumeric() && pbar.numel() >= 2
+                && pbar.elemAsDouble(0) > 0.0 && pbar.elemAsDouble(1) > 0.0) {
+                dst.hasPlotBoxAspectRatio = true;
+                dst.plotBoxAspectX = pbar.elemAsDouble(0);
+                dst.plotBoxAspectY = pbar.elemAsDouble(1);
             }
         }
 

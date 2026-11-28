@@ -370,21 +370,22 @@ keel::f64 computeQuiverScale(const RenderDataset &ds)
     }
     const keel::f64 delx = gridMinStep(ux);
     const keel::f64 dely = gridMinStep(uy);
+    const keel::f64 delDiag = keel::hypot(delx, dely);
 
-    keel::f64 maxNorm = 0.0;
+    keel::f64 maxLen = 0.0;
     for (keel::usize k = 0; k < n; ++k) {
         const keel::f64 u = ds.u[k], v = ds.v[k];
         if (!keel::is_finite(u) || !keel::is_finite(v))
             continue;
-        const keel::f64 nrm = keel::max(keel::abs(u) / delx, keel::abs(v) / dely);
-        if (nrm > maxNorm)
-            maxNorm = nrm;
+        const keel::f64 len = keel::hypot(u, v);
+        if (len > maxLen)
+            maxLen = len;
     }
-    if (!(maxNorm > 1e-12))
+    if (!(maxLen > 1e-12))
         return 1.0;
     const keel::f64 factor = (keel::is_finite(ds.quiverAutoScaleFactor) && ds.quiverAutoScaleFactor > 0.0)
                                  ? ds.quiverAutoScaleFactor : 0.9;
-    return factor / maxNorm;
+    return (factor * 0.9 * delDiag) / maxLen;
 }
 
 void render2dSeries(const RenderAxes &ax, const PlotTransform &tf,

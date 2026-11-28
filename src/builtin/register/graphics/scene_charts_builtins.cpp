@@ -2713,6 +2713,9 @@ void imshow_scene_reg(keel::ArrayRef<Value> args, keel::usize nargout,
 
     scene.setProperty(axId, "YDir", Value::fromString("reverse", mr), mr);
     scene.setProperty(axId, "Visible", Value::fromString("off", mr), mr);
+    Value dar = Value::matrix(1, 3, ValueType::DOUBLE, mr);
+    dar.doubleDataMut()[0] = 1.0; dar.doubleDataMut()[1] = 1.0; dar.doubleDataMut()[2] = 1.0;
+    scene.setProperty(axId, "DataAspectRatio", keel::move(dar), mr);
     if (!cmapArg.isEmpty())
         scene.setProperty(axId, "Colormap", cmapArg, mr);
 
