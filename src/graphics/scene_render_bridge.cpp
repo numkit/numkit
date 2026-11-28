@@ -1,17 +1,13 @@
 // src/graphics/scene_render_bridge.cpp
 //
-// Projects a live GraphicsScene Figure subtree into an ephemeral FigureState
-// consumed by figrender (SVG / PDF / EPS / RGB export). This keeps the
-// Model-First GraphicsScene as the single source of truth with zero live
-// mirroring into legacy FigureManager.
+// Projects a live GraphicsScene Figure subtree directly into strongly-typed
+// ephemeral render-state DTOs (zero JSON serialization or KV string encoding).
 
 #include <keel/algo.h>
 #include <keel/array.h>
 #include <keel/core.h>
-#include <keel/format.h>
 #include <keel/math.h>
 #include <keel/memory.h>
-#include <keel/number.h>
 #include <keel/ref.h>
 #include <keel/string.h>
 
@@ -22,15 +18,19 @@ namespace numkit::gfx {
 
 namespace {
 
-keel::String serializeVec1D(const Value &v)
+bool extractRgb(const Value &v, RenderRgb &out) noexcept
 {
-    if (!v.isNumeric() || v.isEmpty())
-        return keel::String::from("[]");
-    keel::Array<keel::f64> arr;
-    arr.resize(v.numel());
-    for (keel::usize i = 0; i < v.numel(); ++i)
-        arr[i] = v.elemAsDouble(i);
-    return figdetail::serializeFlatDoubles(arr);
+    if (!v.isNumeric() || v.numel() < 3)
+        return false;
+    auto c255 = [](keel::f64 d) -> keel::u8 {
+        if (!keel::is_finite(d) || d <= 0.0) return 0u;
+        if (d >= 1.0) return 255u;
+        return keel::as<keel::u8>(keel::round_i64(d * 255.0));
+    };
+    out = RenderRgb(c255(v.elemAsDouble(0)),
+                    c255(v.elemAsDouble(1)),
+                    c255(v.elemAsDouble(2)));
+    return true;
 }
 
 keel::Array<keel::f64> extractVec1D(const Value &v)
@@ -44,143 +44,173 @@ keel::Array<keel::f64> extractVec1D(const Value &v)
     return arr;
 }
 
-keel::String serializeMat2D(const Value &m)
+void extractMat2DRowMajor(const Value &m, keel::Array<keel::f64> &out,
+                          keel::usize &rows, keel::usize &cols)
 {
+    out.clear();
+    rows = 0;
+    cols = 0;
     if (!m.isNumeric() || m.isEmpty())
-        return keel::String::from("[]");
-    const keel::usize R = m.dims().rows();
-    const keel::usize C = m.dims().cols();
-    keel::String out = keel::String::from("[");
-    char buf[40];
-    for (keel::usize r = 0; r < R; ++r) {
-        if (r) out.push_back(',');
-        out.push_back('[');
-        for (keel::usize c = 0; c < C; ++c) {
-            if (c) out.push_back(',');
-            const keel::f64 val = m.elemAsDouble(r + c * R);
-            if (keel::is_finite(val)) out.append(keel::format_f64_general_to(buf, val, 12));
-            else out.append("null");
-        }
-        out.push_back(']');
+        return;
+    rows = m.dims().rows();
+    cols = m.dims().cols();
+    if (rows == 0 || cols == 0)
+        return;
+    out.resize(rows * cols);
+    for (keel::usize r = 0; r < rows; ++r) {
+        for (keel::usize c = 0; c < cols; ++c)
+            out[r * cols + c] = m.elemAsDouble(r + c * rows);
     }
-    out.push_back(']');
+}
+
+RenderLineStyle parseLineStyleStr(keel::StringRef ls) noexcept
+{
+    if (ls == "--") return RenderLineStyle::Dashed;
+    if (ls == ":")  return RenderLineStyle::Dotted;
+    if (ls == "-.") return RenderLineStyle::DashDot;
+    if (asciiEqualNoCase(ls, "none")) return RenderLineStyle::None;
+    return RenderLineStyle::Solid;
+}
+
+keel::Array<keel::String> extractStringList(const Value &v)
+{
+    keel::Array<keel::String> out;
+    if (v.isEmpty())
+        return out;
+    if (v.isCell()) {
+        out.reserve(v.numel());
+        for (keel::usize i = 0; i < v.numel(); ++i)
+            out.push_back(v.cellAt(i).toString());
+    } else if (v.isChar() || v.isString()) {
+        out.push_back(v.toString());
+    }
     return out;
 }
 
-keel::String rgbToHexStr(const Value &v)
+void extractLimitPair(const GraphicsScene &scene, NodeId id, const char *prop,
+                      keel::Allocator *mr, bool &hasOut, keel::f64 &loOut, keel::f64 &hiOut)
 {
-    if (!v.isNumeric() || v.numel() < 3)
-        return keel::String{};
-    auto c255 = [](keel::f64 d) -> keel::i32 {
-        keel::i32 i = keel::as<keel::i32>(d * 255.0 + 0.5);
-        if (i < 0) i = 0;
-        if (i > 255) i = 255;
-        return i;
-    };
-    return keel::format("#{:02x}{:02x}{:02x}",
-                        c255(v.elemAsDouble(0)),
-                        c255(v.elemAsDouble(1)),
-                        c255(v.elemAsDouble(2)));
+    if (!scene.hasProperty(id, prop))
+        return;
+    const Value lv = scene.getProperty(id, prop, mr);
+    if (!lv.isNumeric() || lv.numel() < 2)
+        return;
+    const keel::f64 lo = lv.elemAsDouble(0);
+    const keel::f64 hi = lv.elemAsDouble(1);
+    if (keel::is_finite(lo) && keel::is_finite(hi) && hi > lo) {
+        hasOut = true;
+        loOut = lo;
+        hiOut = hi;
+    }
 }
 
-keel::String buildStyleKV(const GraphicsScene &scene, NodeId cid, keel::Allocator *mr)
+void projectDatasetStyle(const GraphicsScene &scene, NodeId cid,
+                         RenderDataset &ds, keel::Allocator *mr)
 {
-    keel::String out;
-    auto addKV = [&](const char *k, keel::StringRef val, bool allowNone = false) {
-        if (val.empty() || (!allowNone && val == "none")) return;
-        if (!out.empty()) out.push_back(';');
-        out.append(k);
-        out.push_back('=');
-        out.append(val);
-    };
-    if (scene.hasProperty(cid, "Color")) {
-        const Value cv = scene.getProperty(cid, "Color", mr);
-        if (cv.isNumeric() && cv.numel() >= 3) addKV("color", rgbToHexStr(cv));
-    } else if (scene.hasProperty(cid, "FaceColor")) {
-        const Value fc = scene.getProperty(cid, "FaceColor", mr);
-        if (fc.isNumeric() && fc.numel() >= 3) addKV("color", rgbToHexStr(fc));
+    RenderRgb col;
+    if (scene.hasProperty(cid, "Color") && extractRgb(scene.getProperty(cid, "Color", mr), col)) {
+        ds.color = col;
+        ds.hasColor = true;
+    } else if (scene.hasProperty(cid, "FaceColor") && extractRgb(scene.getProperty(cid, "FaceColor", mr), col)) {
+        ds.color = col;
+        ds.hasColor = true;
     } else if (scene.hasProperty(cid, "CData")) {
         const Value cd = scene.getProperty(cid, "CData", mr);
-        if (cd.isNumeric() && cd.numel() == 3) {
-            addKV("color", rgbToHexStr(cd));
-        } else if (scene.hasProperty(cid, "MarkerEdgeColor")) {
-            const Value mec = scene.getProperty(cid, "MarkerEdgeColor", mr);
-            if (mec.isNumeric() && mec.numel() >= 3) addKV("color", rgbToHexStr(mec));
+        if (cd.isNumeric() && cd.numel() == 3 && extractRgb(cd, col)) {
+            ds.color = col;
+            ds.hasColor = true;
+        } else if (scene.hasProperty(cid, "MarkerEdgeColor")
+                   && extractRgb(scene.getProperty(cid, "MarkerEdgeColor", mr), col)) {
+            ds.color = col;
+            ds.hasColor = true;
         }
     }
+
     if (scene.hasProperty(cid, "LineStyle")) {
         const keel::String ls = scene.getProperty(cid, "LineStyle", mr).toString();
-        if (!ls.empty()) addKV("lineStyle", ls, /*allowNone=*/true);
+        if (!ls.empty())
+            ds.lineStyle = parseLineStyleStr(ls);
     }
+
     if (scene.hasProperty(cid, "Marker")) {
         const keel::String mk = scene.getProperty(cid, "Marker", mr).toString();
-        if (!mk.empty() && mk != "none") addKV("marker", mk);
+        if (!mk.empty() && !asciiEqualNoCase(mk, "none"))
+            ds.marker = mk.clone();
     }
+
     if (scene.hasProperty(cid, "MarkerFaceColor")) {
         const Value mfc = scene.getProperty(cid, "MarkerFaceColor", mr);
-        if (mfc.isNumeric() && mfc.numel() >= 3) {
-            addKV("markerFaceColor", rgbToHexStr(mfc));
+        if (extractRgb(mfc, col)) {
+            ds.markerFaceColor = col;
+            ds.hasMarkerFaceColor = true;
         } else if (mfc.isChar() || mfc.isString()) {
-            const keel::String mfcs = mfc.toString();
-            if (asciiEqualNoCase(mfcs, "auto"))
-                addKV("markerFaceColor", "auto");
+            if (asciiEqualNoCase(mfc.toString(), "auto"))
+                ds.markerFaceAuto = true;
         }
     }
+
     if (scene.hasProperty(cid, "MarkerEdgeColor")) {
         const Value mec = scene.getProperty(cid, "MarkerEdgeColor", mr);
-        if (mec.isNumeric() && mec.numel() >= 3) {
-            addKV("markerEdgeColor", rgbToHexStr(mec));
+        if (extractRgb(mec, col)) {
+            ds.markerEdgeColor = col;
+            ds.hasMarkerEdgeColor = true;
         } else if (mec.isChar() || mec.isString()) {
-            const keel::String mecs = mec.toString();
-            if (asciiEqualNoCase(mecs, "none"))
-                addKV("markerEdgeColor", "none", /*allowNone=*/true);
+            if (asciiEqualNoCase(mec.toString(), "none"))
+                ds.markerEdgeNone = true;
         }
     }
-    if (const GraphicsNode *nd = scene.findNode(cid); nd && nd->classId == ClassId::Text) {
-        if (scene.hasProperty(cid, "FontSize")) {
-            char fbuf[32];
-            addKV("fontSize", keel::format_f64_general_to(fbuf, scene.getProperty(cid, "FontSize", mr).toScalar(), 6));
-        }
-        if (scene.hasProperty(cid, "HorizontalAlignment")) {
-            keel::String ha = scene.getProperty(cid, "HorizontalAlignment", mr).toString();
-            ha.to_ascii_lower_in_place();
-            addKV("halign", ha);
-        }
+
+    if (scene.hasProperty(cid, "FaceColor") && extractRgb(scene.getProperty(cid, "FaceColor", mr), col)) {
+        ds.faceColor = col;
+        ds.hasFaceColor = true;
     }
-    return out;
+    if (scene.hasProperty(cid, "EdgeColor") && extractRgb(scene.getProperty(cid, "EdgeColor", mr), col)) {
+        ds.edgeColor = col;
+        ds.hasEdgeColor = true;
+    }
+    if (scene.hasProperty(cid, "FaceAlpha")) {
+        const Value fa = scene.getProperty(cid, "FaceAlpha", mr);
+        if (fa.isScalar())
+            ds.faceAlpha = fa.toScalar();
+    }
+    if (scene.hasProperty(cid, "BinWidth")) {
+        const Value bw = scene.getProperty(cid, "BinWidth", mr);
+        if (bw.isScalar())
+            ds.binWidth = bw.toScalar();
+    }
 }
 
-keel::String serializeTickLabels(const Value &v)
+void projectColormap(const GraphicsScene &scene, NodeId ownerId,
+                     RenderAxes &dst, keel::Allocator *mr)
 {
-    if (v.isEmpty())
-        return keel::String{};
-    keel::String out = keel::String::from("[");
-    if (v.isCell()) {
-        for (keel::usize i = 0; i < v.numel(); ++i) {
-            if (i) out.push_back(',');
-            out.push_back('"');
-            out.append(v.cellAt(i).toString());
-            out.push_back('"');
+    if (!scene.hasProperty(ownerId, "Colormap"))
+        return;
+    const Value cm = scene.getProperty(ownerId, "Colormap", mr);
+    if (cm.isNumeric() && cm.dims().cols() == 3 && cm.dims().rows() >= 2) {
+        const keel::usize rows = cm.dims().rows();
+        dst.customColormap.clear();
+        dst.customColormap.reserve(rows);
+        auto c255 = [](keel::f64 d) -> keel::u8 {
+            if (!keel::is_finite(d) || d <= 0.0) return 0u;
+            if (d >= 1.0) return 255u;
+            return keel::as<keel::u8>(keel::round_i64(d * 255.0));
+        };
+        for (keel::usize r = 0; r < rows; ++r) {
+            dst.customColormap.push_back(RenderRgb(
+                c255(cm.elemAsDouble(r + 0 * rows)),
+                c255(cm.elemAsDouble(r + 1 * rows)),
+                c255(cm.elemAsDouble(r + 2 * rows))));
         }
-    } else if (v.isChar() || v.isString()) {
-        out.push_back('"');
-        out.append(v.toString());
-        out.push_back('"');
     }
-    out.push_back(']');
-    return out;
 }
 
-void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, keel::Allocator *mr)
+void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, keel::Allocator *mr)
 {
     const GraphicsNode *ax = scene.findNode(axId);
     if (!ax)
         return;
 
     dst.polar = (ax->classId == ClassId::PolarAxes);
-    dst.subplotIndex = ax->subplotIdx;
-    dst.subplotRows = ax->subplotRows;
-    dst.subplotCols = ax->subplotCols;
 
     if (scene.hasProperty(axId, "Position")) {
         const Value pos = scene.getProperty(axId, "Position", mr);
@@ -205,8 +235,32 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, kee
         dst.subtitle = scene.getProperty(ax->subtitleId, "String", mr).toString();
 
     dst.axisVisible = !asciiEqualNoCase(scene.getProperty(axId, "Visible", mr).toString(), "off");
+    dst.fontSize = scene.getProperty(axId, "FontSize", mr).toScalar();
+    dst.fontBold = asciiEqualNoCase(scene.getProperty(axId, "FontWeight", mr).toString(), "bold");
+    dst.fontName = scene.getProperty(axId, "FontName", mr).toString();
+    dst.lineWidth = scene.getProperty(axId, "LineWidth", mr).toScalar();
 
-    if (!dst.polar) {
+    if (dst.polar) {
+        extractLimitPair(scene, axId, "RLim", mr, dst.hasRLim, dst.rLo, dst.rHi);
+        if (scene.hasProperty(axId, "RTickMode")
+            && asciiEqualNoCase(scene.getProperty(axId, "RTickMode", mr).toString(), "manual")) {
+            dst.rTicks = extractVec1D(scene.getProperty(axId, "RTick", mr));
+        }
+        if (scene.hasProperty(axId, "ThetaTickMode")
+            && asciiEqualNoCase(scene.getProperty(axId, "ThetaTickMode", mr).toString(), "manual")) {
+            dst.thetaTicks = extractVec1D(scene.getProperty(axId, "ThetaTick", mr));
+        }
+        if (scene.hasProperty(axId, "ThetaTickLabelMode")
+            && asciiEqualNoCase(scene.getProperty(axId, "ThetaTickLabelMode", mr).toString(), "manual")) {
+            dst.thetaTickLabels = extractStringList(scene.getProperty(axId, "ThetaTickLabel", mr));
+        }
+        if (scene.hasProperty(axId, "ThetaDir"))
+            dst.thetaClockwise = asciiEqualNoCase(scene.getProperty(axId, "ThetaDir", mr).toString(), "clockwise");
+        if (scene.hasProperty(axId, "ThetaZeroLocation")) {
+            dst.thetaZeroLocation = scene.getProperty(axId, "ThetaZeroLocation", mr).toString();
+            dst.thetaZeroLocation.to_ascii_lower_in_place();
+        }
+    } else {
         if (ax->xLabelId != kInvalidNodeId && scene.findNode(ax->xLabelId))
             dst.xlabel = scene.getProperty(ax->xLabelId, "String", mr).toString();
         if (ax->yLabelId != kInvalidNodeId && scene.findNode(ax->yLabelId))
@@ -214,70 +268,80 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, kee
         if (ax->yLabelRightId != kInvalidNodeId && scene.findNode(ax->yLabelRightId)) {
             dst.ylabel2 = scene.getProperty(ax->yLabelRightId, "String", mr).toString();
             dst.yyEnabled = true;
-            dst.activeYside = keel::String::from(ax->yyRightActive ? "right" : "left");
+        }
+        if (ax->yAxisRightId != kInvalidNodeId && scene.findNode(ax->yAxisRightId)) {
+            dst.yyEnabled = true;
+            extractLimitPair(scene, ax->yAxisRightId, "Limits", mr, dst.hasY2Lim, dst.y2Lo, dst.y2Hi);
+            if (scene.hasProperty(ax->yAxisRightId, "Scale"))
+                dst.y2Log = asciiEqualNoCase(scene.getProperty(ax->yAxisRightId, "Scale", mr).toString(), "log");
         }
         if (ax->zLabelId != kInvalidNodeId && scene.findNode(ax->zLabelId))
             dst.zlabel = scene.getProperty(ax->zLabelId, "String", mr).toString();
 
-        dst.xscale = scene.getProperty(axId, "XScale", mr).toString();
-        dst.yscale = scene.getProperty(axId, "YScale", mr).toString();
-        dst.xDir = scene.getProperty(axId, "XDir", mr).toString();
-        dst.yDir = scene.getProperty(axId, "YDir", mr).toString();
+        dst.xLog = asciiEqualNoCase(scene.getProperty(axId, "XScale", mr).toString(), "log");
+        dst.yLog = asciiEqualNoCase(scene.getProperty(axId, "YScale", mr).toString(), "log");
+        dst.xReverse = asciiEqualNoCase(scene.getProperty(axId, "XDir", mr).toString(), "reverse");
+        dst.yReverse = asciiEqualNoCase(scene.getProperty(axId, "YDir", mr).toString(), "reverse");
         dst.boxOn = !asciiEqualNoCase(scene.getProperty(axId, "Box", mr).toString(), "off");
         dst.gridMajor = asciiEqualNoCase(scene.getProperty(axId, "XGrid", mr).toString(), "on")
                         || asciiEqualNoCase(scene.getProperty(axId, "YGrid", mr).toString(), "on");
         dst.gridMinor = asciiEqualNoCase(scene.getProperty(axId, "XMinorGrid", mr).toString(), "on")
                         || asciiEqualNoCase(scene.getProperty(axId, "YMinorGrid", mr).toString(), "on");
-        if (dst.gridMajor || dst.gridMinor)
-            dst.gridUserTouched = true;
-        dst.fontSize = scene.getProperty(axId, "FontSize", mr).toScalar();
-        dst.fontWeight = scene.getProperty(axId, "FontWeight", mr).toString();
-        dst.fontName = scene.getProperty(axId, "FontName", mr).toString();
-        dst.lineWidth = scene.getProperty(axId, "LineWidth", mr).toScalar();
 
         if (asciiEqualNoCase(scene.getProperty(axId, "DataAspectRatioMode", mr).toString(), "manual")) {
             const Value dar = scene.getProperty(axId, "DataAspectRatio", mr);
             if (dar.isNumeric() && dar.numel() >= 2
                 && keel::abs(dar.elemAsDouble(0) - dar.elemAsDouble(1)) < 1e-9) {
-                dst.axisMode = keel::String::from("equal");
+                dst.equalAspect = true;
             }
         }
 
-        auto forwardLim = [&](const char *prop, keel::String &outJson) {
-            const Value lv = scene.getProperty(axId, prop, mr);
-            if (lv.isNumeric() && lv.numel() == 2) {
-                const keel::f64 lo = lv.elemAsDouble(0);
-                const keel::f64 hi = lv.elemAsDouble(1);
-                if (keel::is_finite(lo) && keel::is_finite(hi) && hi > lo)
-                    outJson = serializeVec1D(lv);
-            }
-        };
-        forwardLim("XLim", dst.xlimJson);
-        forwardLim("YLim", dst.ylimJson);
+        extractLimitPair(scene, axId, "XLim", mr, dst.hasXLim, dst.xLo, dst.xHi);
+        extractLimitPair(scene, axId, "YLim", mr, dst.hasYLim, dst.yLo, dst.yHi);
         if (asciiEqualNoCase(scene.getProperty(axId, "ZLimMode", mr).toString(), "manual"))
-            forwardLim("ZLim", dst.zlimJson);
+            extractLimitPair(scene, axId, "ZLim", mr, dst.hasZLim, dst.zLo, dst.zHi);
+        if (scene.hasProperty(axId, "CLimMode")
+            && asciiEqualNoCase(scene.getProperty(axId, "CLimMode", mr).toString(), "manual")) {
+            extractLimitPair(scene, axId, "CLim", mr, dst.hasCLim, dst.cLo, dst.cHi);
+        }
 
-        if (asciiEqualNoCase(scene.getProperty(axId, "XTickMode", mr).toString(), "manual")) {
-            dst.xTicksJson = serializeVec1D(scene.getProperty(axId, "XTick", mr));
-            dst.xTicksAuto = false;
-        }
-        if (asciiEqualNoCase(scene.getProperty(axId, "YTickMode", mr).toString(), "manual")) {
-            dst.yTicksJson = serializeVec1D(scene.getProperty(axId, "YTick", mr));
-            dst.yTicksAuto = false;
-        }
+        if (asciiEqualNoCase(scene.getProperty(axId, "XTickMode", mr).toString(), "manual"))
+            dst.xTicks = extractVec1D(scene.getProperty(axId, "XTick", mr));
+        if (asciiEqualNoCase(scene.getProperty(axId, "YTickMode", mr).toString(), "manual"))
+            dst.yTicks = extractVec1D(scene.getProperty(axId, "YTick", mr));
         if (asciiEqualNoCase(scene.getProperty(axId, "XTickLabelMode", mr).toString(), "manual"))
-            dst.xTickLabelsJson = serializeTickLabels(scene.getProperty(axId, "XTickLabel", mr));
+            dst.xTickLabels = extractStringList(scene.getProperty(axId, "XTickLabel", mr));
         if (asciiEqualNoCase(scene.getProperty(axId, "YTickLabelMode", mr).toString(), "manual"))
-            dst.yTickLabelsJson = serializeTickLabels(scene.getProperty(axId, "YTickLabel", mr));
+            dst.yTickLabels = extractStringList(scene.getProperty(axId, "YTickLabel", mr));
+
+        if (scene.hasProperty(axId, "View")) {
+            const Value vv = scene.getProperty(axId, "View", mr);
+            if (vv.isNumeric() && vv.numel() >= 2) {
+                dst.viewAz = vv.elemAsDouble(0);
+                dst.viewEl = vv.elemAsDouble(1);
+            }
+        }
+        projectColormap(scene, axId, dst, mr);
     }
 
-    // Walk children in creation order (ax->children is stored oldest-first).
+    // Project ColorBar (if attached to this axes)
+    if (ax->colorBarId != kInvalidNodeId && scene.findNode(ax->colorBarId)) {
+        const bool cbVis = !asciiEqualNoCase(scene.getProperty(ax->colorBarId, "Visible", mr).toString(), "off");
+        if (cbVis) {
+            dst.colorbarLocation = scene.getProperty(ax->colorBarId, "Location", mr).toString();
+            dst.colorbarLocation.to_ascii_lower_in_place();
+            if (dst.colorbarLocation.empty())
+                dst.colorbarLocation = keel::String::from("eastoutside");
+        }
+    }
+
+    // Walk children in creation order (oldest-first).
     for (keel::usize i = 0; i < ax->children.size(); ++i) {
         const NodeId cid = ax->children[i];
         const GraphicsNode *ch = scene.findNode(cid);
         if (!ch) continue;
 
-        DatasetInfo ds;
+        RenderDataset ds;
         ds.visible = !asciiEqualNoCase(scene.getProperty(cid, "Visible", mr).toString(), "off");
         if (scene.hasProperty(cid, "HandleVisibility"))
             ds.handleVisible = !asciiEqualNoCase(scene.getProperty(cid, "HandleVisibility", mr).toString(), "off");
@@ -288,145 +352,148 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, kee
         if (scene.hasProperty(cid, "MarkerSize"))
             ds.markerSize = scene.getProperty(cid, "MarkerSize", mr).toScalar();
         if (ch->rulerAxis == 'Y')
-            ds.yside = keel::String::from("right");
-        ds.style = buildStyleKV(scene, cid, mr);
+            ds.rightYAxis = true;
+        projectDatasetStyle(scene, cid, ds, mr);
 
         switch (ch->classId) {
-        case ClassId::Line: {
-            ds.type = keel::String::from("line");
-            const Value xd = scene.getProperty(cid, "XData", mr);
-            const Value yd = scene.getProperty(cid, "YData", mr);
-            const Value zd = scene.getProperty(cid, "ZData", mr);
-            ds.xRaw = extractVec1D(xd);
-            ds.yRaw = extractVec1D(yd);
-            ds.xJson = serializeVec1D(xd);
-            ds.yJson = serializeVec1D(yd);
+        case ClassId::Line:
+        case ClassId::FunctionLine:
+        case ClassId::ParameterizedFunctionLine: {
+            ds.kind = RenderChartKind::Line;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            const Value zd = scene.hasProperty(cid, "ZData") ? scene.getProperty(cid, "ZData", mr) : Value();
             if (!zd.isEmpty()) {
-                ds.type = keel::String::from("plot3");
-                ds.zJson = serializeVec1D(zd);
+                ds.kind = RenderChartKind::Plot3;
+                ds.z = extractVec1D(zd);
+            }
+            break;
+        }
+        case ClassId::ConstantLine: {
+            ds.kind = RenderChartKind::Line;
+            const keel::f64 val = scene.hasProperty(cid, "Value")
+                                      ? scene.getProperty(cid, "Value", mr).toScalar()
+                                      : 0.0;
+            const keel::String ia = scene.hasProperty(cid, "InterceptAxis")
+                                        ? scene.getProperty(cid, "InterceptAxis", mr).toString()
+                                        : keel::String::from("x");
+            if (asciiEqualNoCase(ia, "y")) {
+                ds.x.push_back(dst.hasXLim ? dst.xLo : 0.0);
+                ds.x.push_back(dst.hasXLim ? dst.xHi : 1.0);
+                ds.y.push_back(val);
+                ds.y.push_back(val);
+            } else {
+                ds.x.push_back(val);
+                ds.x.push_back(val);
+                ds.y.push_back(dst.hasYLim ? dst.yLo : 0.0);
+                ds.y.push_back(dst.hasYLim ? dst.yHi : 1.0);
             }
             break;
         }
         case ClassId::Scatter: {
-            ds.type = keel::String::from("scatter");
-            const Value xd = scene.getProperty(cid, "XData", mr);
-            const Value yd = scene.getProperty(cid, "YData", mr);
-            ds.xRaw = extractVec1D(xd);
-            ds.yRaw = extractVec1D(yd);
-            ds.xJson = serializeVec1D(xd);
-            ds.yJson = serializeVec1D(yd);
+            ds.kind = RenderChartKind::Scatter;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            if (scene.hasProperty(cid, "SizeData"))
+                ds.sizes = extractVec1D(scene.getProperty(cid, "SizeData", mr));
             break;
         }
         case ClassId::Bar: {
-            ds.type = keel::String::from("bar");
-            const Value xd = scene.getProperty(cid, "XData", mr);
-            const Value yd = scene.getProperty(cid, "YData", mr);
-            ds.xRaw = extractVec1D(xd);
-            ds.yRaw = extractVec1D(yd);
-            ds.xJson = serializeVec1D(xd);
-            ds.yJson = serializeVec1D(yd);
+            ds.kind = RenderChartKind::Bar;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             break;
         }
         case ClassId::Surface: {
-            ds.type = keel::String::from("surf");
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
-            ds.zJson = serializeMat2D(scene.getProperty(cid, "ZData", mr));
+            ds.kind = RenderChartKind::Surface;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            extractMat2DRowMajor(scene.getProperty(cid, "ZData", mr), ds.z, ds.zRows, ds.zCols);
             break;
         }
         case ClassId::Patch: {
-            ds.type = keel::String::from("polygon");
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
+            ds.kind = RenderChartKind::Polygon;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             break;
         }
         case ClassId::Quiver: {
-            ds.type = keel::String::from("quiver");
-            const Value xd = scene.getProperty(cid, "XData", mr);
-            const Value yd = scene.getProperty(cid, "YData", mr);
-            const Value ud = scene.getProperty(cid, "UData", mr);
-            const Value vd = scene.getProperty(cid, "VData", mr);
-            ds.xRaw = extractVec1D(xd);
-            ds.yRaw = extractVec1D(yd);
-            ds.xJson = serializeVec1D(xd);
-            ds.yJson = serializeVec1D(yd);
-            ds.uJson = serializeVec1D(ud);
-            ds.vJson = serializeVec1D(vd);
+            ds.kind = RenderChartKind::Quiver;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            ds.u = extractVec1D(scene.getProperty(cid, "UData", mr));
+            ds.v = extractVec1D(scene.getProperty(cid, "VData", mr));
             break;
         }
         case ClassId::Contour: {
-            ds.type = keel::String::from("contour");
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
-            ds.zJson = serializeMat2D(scene.getProperty(cid, "ZData", mr));
+            ds.kind = RenderChartKind::Contour;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            extractMat2DRowMajor(scene.getProperty(cid, "ZData", mr), ds.z, ds.zRows, ds.zCols);
             break;
         }
         case ClassId::Stem: {
-            ds.type = keel::String::from("stem");
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
+            ds.kind = RenderChartKind::Stem;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             break;
         }
         case ClassId::ErrorBar: {
-            ds.type = keel::String::from("errorbar");
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
-            ds.eNegJson = serializeVec1D(scene.getProperty(cid, "YNegativeDelta", mr));
-            ds.ePosJson = serializeVec1D(scene.getProperty(cid, "YPositiveDelta", mr));
+            ds.kind = RenderChartKind::ErrorBar;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            ds.eNeg = extractVec1D(scene.getProperty(cid, "YNegativeDelta", mr));
+            ds.ePos = extractVec1D(scene.getProperty(cid, "YPositiveDelta", mr));
             break;
         }
         case ClassId::Histogram: {
-            ds.type = keel::String::from("histogram");
+            ds.kind = RenderChartKind::Histogram;
             const Value edges = scene.getProperty(cid, "BinEdges", mr);
             const Value vals = scene.getProperty(cid, "Values", mr);
             const keel::usize nb = vals.numel();
-            keel::Array<keel::f64> centers;
-            centers.resize(nb);
+            ds.x.resize(nb);
             for (keel::usize k = 0; k < nb && k + 1 < edges.numel(); ++k)
-                centers[k] = 0.5 * (edges.elemAsDouble(k) + edges.elemAsDouble(k + 1));
-            ds.xRaw = extractVec1D(edges);
-            ds.yRaw = extractVec1D(vals);
-            ds.xJson = figdetail::serializeFlatDoubles(centers);
-            ds.yJson = serializeVec1D(vals);
-            ds.zJson = serializeVec1D(edges);
+                ds.x[k] = 0.5 * (edges.elemAsDouble(k) + edges.elemAsDouble(k + 1));
+            ds.y = extractVec1D(vals);
+            if (!(ds.binWidth > 0.0) && edges.numel() >= 2)
+                ds.binWidth = keel::abs(edges.elemAsDouble(1) - edges.elemAsDouble(0));
             break;
         }
         case ClassId::Area: {
-            ds.type = keel::String::from("area");
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
+            ds.kind = RenderChartKind::Area;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             break;
         }
         case ClassId::Image: {
             const Value cd = scene.getProperty(cid, "CData", mr);
             const keel::usize rows = cd.dims().rows();
             const keel::usize cols = cd.dims().cols();
-            ds.originalRows = rows;
-            ds.originalCols = cols;
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
+            ds.imageRows = rows;
+            ds.imageCols = cols;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             if (cd.dims().ndim() >= 3 && cd.dims().dim(2) == 3 && rows > 0 && cols > 0) {
-                ds.type = keel::String::from("image-rgb");
+                ds.kind = RenderChartKind::ImageRgb;
                 const keel::usize plane = rows * cols;
                 const bool isU8 = (cd.type() == ValueType::UINT8);
-                ds.rgbBytes.resize(plane * 4u, 255u);
+                ds.imagePixels.resize(plane * 4u, 255u);
                 for (keel::usize r = 0; r < rows; ++r) {
                     for (keel::usize c = 0; c < cols; ++c) {
                         const keel::usize srcBase = r + c * rows;
                         const keel::usize dstBase = (r * cols + c) * 4u;
-                        for (keel::usize ch = 0; ch < 3; ++ch) {
-                            keel::f64 v = cd.elemAsDouble(srcBase + ch * plane);
+                        for (keel::usize chIdx = 0; chIdx < 3; ++chIdx) {
+                            keel::f64 v = cd.elemAsDouble(srcBase + chIdx * plane);
                             if (!isU8) v *= 255.0;
                             if (!keel::is_finite(v) || v < 0.0) v = 0.0;
                             if (v > 255.0) v = 255.0;
-                            ds.rgbBytes[dstBase + ch] = keel::as<keel::u8>(keel::round_i64(v));
+                            ds.imagePixels[dstBase + chIdx] = keel::as<keel::u8>(keel::round_i64(v));
                         }
-                        ds.rgbBytes[dstBase + 3u] = 255u;
+                        ds.imagePixels[dstBase + 3u] = 255u;
                     }
                 }
             } else {
-                ds.type = keel::String::from("imagesc");
-                ds.zJson = serializeMat2D(cd);
+                ds.kind = RenderChartKind::ImageIndexed;
                 const keel::usize n = rows * cols;
                 keel::f64 lo = keel::Limits<keel::f64>::infinity();
                 keel::f64 hi = -keel::Limits<keel::f64>::infinity();
@@ -441,48 +508,54 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, kee
                     lo = 0.0;
                     hi = 1.0;
                 }
-                ds.cminOrig = lo;
-                ds.cmaxOrig = hi;
+                ds.cmin = lo;
+                ds.cmax = hi;
                 const keel::f64 span = (hi > lo) ? (hi - lo) : 1.0;
-                ds.zQuantized.resize(n, 255u);
+                ds.imagePixels.resize(n, 255u);
                 for (keel::usize k = 0; k < n; ++k) {
                     const keel::f64 v = cd.elemAsDouble(k);
                     if (!keel::is_finite(v)) {
-                        ds.zQuantized[k] = 255u;
+                        ds.imagePixels[k] = 255u;
                     } else {
                         keel::f64 t = (v - lo) / span;
                         if (t < 0.0) t = 0.0;
                         if (t > 1.0) t = 1.0;
-                        ds.zQuantized[k] = keel::as<keel::u8>(keel::round_i64(t * 254.0));
+                        ds.imagePixels[k] = keel::as<keel::u8>(keel::round_i64(t * 254.0));
                     }
                 }
             }
             break;
         }
         case ClassId::Stair: {
-            ds.type = keel::String::from("stairs");
-            ds.xJson = serializeVec1D(scene.getProperty(cid, "XData", mr));
-            ds.yJson = serializeVec1D(scene.getProperty(cid, "YData", mr));
+            ds.kind = RenderChartKind::Stairs;
+            ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
+            ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             break;
         }
         case ClassId::AnimatedLine: {
-            ds.type = keel::String::from("line");
-            ds.xRaw = ch->animX.clone();
-            ds.yRaw = ch->animY.clone();
-            ds.xJson = figdetail::serializeFlatDoubles(ch->animX);
-            ds.yJson = figdetail::serializeFlatDoubles(ch->animY);
+            ds.kind = RenderChartKind::Line;
+            ds.x = ch->animX.clone();
+            ds.y = ch->animY.clone();
             break;
         }
         case ClassId::Text: {
-            ds.type = keel::String::from("text");
+            ds.kind = RenderChartKind::Text;
             const Value pos = scene.getProperty(cid, "Position", mr);
             if (pos.numel() >= 2) {
-                keel::Array<keel::f64> xv(1, pos.elemAsDouble(0));
-                keel::Array<keel::f64> yv(1, pos.elemAsDouble(1));
-                ds.xJson = figdetail::serializeFlatDoubles(xv);
-                ds.yJson = figdetail::serializeFlatDoubles(yv);
+                ds.x.push_back(pos.elemAsDouble(0));
+                ds.y.push_back(pos.elemAsDouble(1));
             }
             ds.label = scene.getProperty(cid, "String", mr).toString();
+            if (scene.hasProperty(cid, "FontSize"))
+                ds.fontSize = scene.getProperty(cid, "FontSize", mr).toScalar();
+            if (scene.hasProperty(cid, "HorizontalAlignment")) {
+                const keel::String ha = scene.getProperty(cid, "HorizontalAlignment", mr).toString();
+                if (asciiEqualNoCase(ha, "center")) ds.halign = RenderHAlign::Center;
+                else if (asciiEqualNoCase(ha, "right")) ds.halign = RenderHAlign::Right;
+                else ds.halign = RenderHAlign::Left;
+            }
+            if (!ds.hasColor)
+                ds.color = RenderRgb(0, 0, 0);
             break;
         }
         default:
@@ -494,36 +567,56 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, AxesState &dst, kee
     // Project Legend (if attached to this axes).
     if (ax->legendId != kInvalidNodeId && scene.findNode(ax->legendId)) {
         const NodeId lgId = ax->legendId;
-        dst.legendHidden = asciiEqualNoCase(scene.getProperty(lgId, "Visible", mr).toString(), "off");
+        dst.legendVisible = !asciiEqualNoCase(scene.getProperty(lgId, "Visible", mr).toString(), "off");
         dst.legendBoxOn = !asciiEqualNoCase(scene.getProperty(lgId, "Box", mr).toString(), "off");
         dst.legendLocation = scene.getProperty(lgId, "Location", mr).toString();
         dst.legendLocation.to_ascii_lower_in_place();
 
-        const Value lgStr = scene.getProperty(lgId, "String", mr);
-        if (lgStr.isCell() && !lgStr.isEmpty()) {
-            for (keel::usize k = 0; k < lgStr.numel(); ++k) {
-                keel::String lbl = lgStr.cellAt(k).toString();
-                if (!lbl.empty())
-                    dst.legendLabels.push_back(keel::move(lbl));
-            }
-        } else if ((lgStr.isChar() || lgStr.isString()) && !lgStr.isEmpty()) {
-            keel::String lbl = lgStr.toString();
-            if (!lbl.empty())
-                dst.legendLabels.push_back(keel::move(lbl));
+        keel::Array<keel::String> explicitLabels = extractStringList(scene.getProperty(lgId, "String", mr));
+        for (keel::usize k = 0; k < explicitLabels.size(); ++k) {
+            if (!explicitLabels[k].empty())
+                dst.legendLabels.push_back(keel::move(explicitLabels[k]));
         }
-        // Auto-collect DisplayName from visible chart children when legend() was
-        // called with no explicit label strings (e.g. `legend('Location','northeast')`).
+        // Auto-collect DisplayName from visible, handle-visible chart children.
         if (dst.legendLabels.empty()) {
             for (keel::usize d = 0; d < dst.datasets.size(); ++d) {
-                const DatasetInfo &ds = dst.datasets[d];
-                if (!ds.visible || !ds.handleVisible || ds.type == "text"
-                    || ds.type == "imagesc" || ds.type == "image-rgb")
+                const RenderDataset &ds = dst.datasets[d];
+                if (!ds.visible || !ds.handleVisible || ds.kind == RenderChartKind::Text
+                    || ds.kind == RenderChartKind::ImageIndexed || ds.kind == RenderChartKind::ImageRgb)
                     continue;
                 if (!ds.label.empty())
                     dst.legendLabels.push_back(ds.label.clone());
             }
         }
     }
+}
+
+void projectFigureAnnotation(const GraphicsScene &scene, NodeId cid,
+                             FigureState &out, keel::Allocator *mr)
+{
+    const GraphicsNode *ch = scene.findNode(cid);
+    if (!ch || ch->classId != ClassId::TextBox)
+        return;
+    if (asciiEqualNoCase(scene.getProperty(cid, "Visible", mr).toString(), "off"))
+        return;
+    const Value pos = scene.getProperty(cid, "Position", mr);
+    if (!pos.isNumeric() || pos.numel() < 4)
+        return;
+    RenderAnnotation an;
+    an.type = keel::String::from("textbox");
+    an.x1 = pos.elemAsDouble(0);
+    an.y1 = pos.elemAsDouble(1);
+    an.x2 = an.x1 + pos.elemAsDouble(2);
+    an.y2 = an.y1 + pos.elemAsDouble(3);
+    if (scene.hasProperty(cid, "String"))
+        an.text = scene.getProperty(cid, "String", mr).toString();
+    if (scene.hasProperty(cid, "FontSize"))
+        an.fontSize = scene.getProperty(cid, "FontSize", mr).toScalar();
+    if (scene.hasProperty(cid, "EdgeColor"))
+        extractRgb(scene.getProperty(cid, "EdgeColor", mr), an.color);
+    if (scene.hasProperty(cid, "BackgroundColor"))
+        an.hasFaceColor = extractRgb(scene.getProperty(cid, "BackgroundColor", mr), an.faceColor);
+    out.annotations.push_back(keel::move(an));
 }
 
 } // anonymous namespace
@@ -538,7 +631,6 @@ bool projectSceneFigureToRenderState(const GraphicsScene &scene, NodeId figId,
     auto *res = mr ? mr : scene.allocator();
     out = FigureState{};
     out.id = fn->figureNumber > 0 ? fn->figureNumber : 1;
-    out.axes.clear();
 
     if (scene.hasProperty(figId, "Position")) {
         const Value fpos = scene.getProperty(figId, "Position", res);
@@ -551,28 +643,21 @@ bool projectSceneFigureToRenderState(const GraphicsScene &scene, NodeId figId,
             }
         }
     }
-    if (scene.hasProperty(figId, "Color")) {
-        const Value fcol = scene.getProperty(figId, "Color", res);
-        if (fcol.isNumeric() && fcol.numel() >= 3)
-            out.bgColorHex = rgbToHexStr(fcol);
-    }
+    if (scene.hasProperty(figId, "Color"))
+        extractRgb(scene.getProperty(figId, "Color", res), out.bgColor);
+    if (fn->titleId != kInvalidNodeId && scene.findNode(fn->titleId))
+        out.superTitle = scene.getProperty(fn->titleId, "String", res).toString();
 
-    // Collect direct Axes/PolarAxes and TiledChartLayout children in creation order.
     keel::Array<NodeId> axList(res);
     for (keel::usize i = 0; i < fn->children.size(); ++i) {
         const NodeId cid = fn->children[i];
         const GraphicsNode *ch = scene.findNode(cid);
         if (!ch) continue;
         if (ch->classId == ClassId::Axes || ch->classId == ClassId::PolarAxes) {
-            if (ch->subplotRows > out.subplotRows) out.subplotRows = ch->subplotRows;
-            if (ch->subplotCols > out.subplotCols) out.subplotCols = ch->subplotCols;
             axList.push_back(cid);
         } else if (ch->classId == ClassId::TiledChartLayout) {
-            const Value gs = scene.getProperty(cid, "GridSize", res);
-            if (gs.numel() >= 2) {
-                out.subplotRows = keel::as<keel::i32>(gs.elemAsDouble(0));
-                out.subplotCols = keel::as<keel::i32>(gs.elemAsDouble(1));
-            }
+            if (out.superTitle.empty() && ch->titleId != kInvalidNodeId && scene.findNode(ch->titleId))
+                out.superTitle = scene.getProperty(ch->titleId, "String", res).toString();
             for (keel::usize j = 0; j < ch->children.size(); ++j) {
                 const NodeId tcid = ch->children[j];
                 if (const GraphicsNode *tc = scene.findNode(tcid);
@@ -580,20 +665,21 @@ bool projectSceneFigureToRenderState(const GraphicsScene &scene, NodeId figId,
                     axList.push_back(tcid);
                 }
             }
+        } else if (ch->classId == ClassId::TextBox) {
+            projectFigureAnnotation(scene, cid, out, res);
         }
     }
 
     if (axList.empty()) {
-        out.axes.push_back(AxesState{});
-        out.currentAxes = 0;
+        out.axes.push_back(RenderAxes{});
         return true;
     }
 
     for (keel::usize k = 0; k < axList.size(); ++k) {
-        AxesState st;
+        RenderAxes st;
         projectOneAxes(scene, axList[k], st, res);
-        if (axList[k] == fn->currentAxesId)
-            out.currentAxes = keel::as<keel::i32>(k);
+        if (st.customColormap.empty())
+            projectColormap(scene, figId, st, res);
         out.axes.push_back(keel::move(st));
     }
     return true;

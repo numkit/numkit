@@ -597,6 +597,8 @@ TEST_P(GraphicsSceneTest, Phase3BarHistogramPatchAnimatedLineAndAnnotation)
 
 TEST_P(GraphicsSceneTest, Phase4DirectSceneExportAndReactiveRollback)
 {
+    const std::string tag = (engine.backend() == numkit::Engine::Backend::VM) ? "_vm" : "_tw";
+    const std::string fSvg = "numkit_phase4_scene" + tag + ".svg";
     // 1. Live GraphicsScene mutation exported directly to SVG without FigureManager mirror
     eval("close all force;"
          "f = figure('Visible', 'off');"
@@ -604,9 +606,9 @@ TEST_P(GraphicsSceneTest, Phase4DirectSceneExportAndReactiveRollback)
          "h = plot(ax, [1 2 3], [10 20 30]);"
          "h.YData = [100 250 400];"
          "ax.Title.String = 'DirectSceneSVG';"
-         "saveas(f, 'numkit_phase4_scene.svg');"
-         "svgTxt = fileread('numkit_phase4_scene.svg');"
-         "delete('numkit_phase4_scene.svg');");
+         "saveas(f, '" + fSvg + "');"
+         "svgTxt = fileread('" + fSvg + "');"
+         "delete('" + fSvg + "');");
     ASSERT_NE(getVarPtr("svgTxt"), nullptr);
     EXPECT_NE(getVarPtr("svgTxt")->toString().find("DirectSceneSVG"), std::string::npos);
     EXPECT_NE(getVarPtr("svgTxt")->toString().find("400"), std::string::npos);

@@ -103,17 +103,16 @@ figrender::SvgImageEmbedder svgPngEmbedder(
 }
 
 struct ExportArgs {
-    const FigureState *fig = nullptr;
-    FigureState projectedFig;
-    bool useProjected = false;
+    FigureState fig;
+    bool hasFig = false;
     bool rgbImage = false;
     keel::String path;
-    keel::String ext;       // from filename or explicit format
-    keel::i32 dpi = 150;          // default raster resolution; scales the 840x630 base
+    keel::String ext;
+    keel::i32 dpi = 150;
 
     const FigureState *resolvedFigure() const noexcept
     {
-        return useProjected ? &projectedFig : fig;
+        return hasFig ? &fig : nullptr;
     }
 };
 
@@ -128,8 +127,8 @@ bool resolveTargetFigure(Engine &engine, const Value &v, ExportArgs &out)
         const gfx::NodeId figId = (node->classId == gfx::ClassId::Figure)
                                       ? hid : scene.containingFigure(hid);
         if (figId != gfx::kInvalidNodeId
-            && gfx::projectSceneFigureToRenderState(scene, figId, out.projectedFig, engine.allocator())) {
-            out.useProjected = true;
+            && gfx::projectSceneFigureToRenderState(scene, figId, out.fig, engine.allocator())) {
+            out.hasFig = true;
             return true;
         }
         return false;
@@ -138,8 +137,8 @@ bool resolveTargetFigure(Engine &engine, const Value &v, ExportArgs &out)
         const keel::i32 num = keel::as<keel::i32>(v.toScalar());
         const gfx::NodeId figId = scene.findFigureByNumber(num);
         if (figId != gfx::kInvalidNodeId
-            && gfx::projectSceneFigureToRenderState(scene, figId, out.projectedFig, engine.allocator())) {
-            out.useProjected = true;
+            && gfx::projectSceneFigureToRenderState(scene, figId, out.fig, engine.allocator())) {
+            out.hasFig = true;
             return true;
         }
         return false;
@@ -219,8 +218,8 @@ ExportArgs parseExportArgs(Engine &engine, keel::ArrayRef<Value> args,
     if (needTarget && !out.resolvedFigure()) {
         const gfx::NodeId curFig = engine.graphicsScene().ensureCurrentFigure();
         if (curFig != gfx::kInvalidNodeId
-            && gfx::projectSceneFigureToRenderState(engine.graphicsScene(), curFig, out.projectedFig, engine.allocator())) {
-            out.useProjected = true;
+            && gfx::projectSceneFigureToRenderState(engine.graphicsScene(), curFig, out.fig, engine.allocator())) {
+            out.hasFig = true;
         }
     }
     if (out.rgbImage)
@@ -390,13 +389,13 @@ void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
     if (!fig) {
         const gfx::NodeId curFig = eng.graphicsScene().ensureCurrentFigure();
         if (curFig != gfx::kInvalidNodeId
-            && gfx::projectSceneFigureToRenderState(eng.graphicsScene(), curFig, ea.projectedFig, mr)) {
-            ea.useProjected = true;
+            && gfx::projectSceneFigureToRenderState(eng.graphicsScene(), curFig, ea.fig, mr)) {
+            ea.hasFig = true;
             fig = ea.resolvedFigure();
         }
     }
     if (!fig) {
-        ea.useProjected = true;
+        ea.hasFig = true;
         fig = ea.resolvedFigure();
     }
     const keel::i32 W = 560, H = 420;

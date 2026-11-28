@@ -1,7 +1,7 @@
 /// @file figure_render.hpp
 /// @ingroup group_graphics
 ///
-/// Software figure renderer declarations (SVG / EPS / PDF / RGB raster).
+/// Software figure renderer public API (SVG / EPS / PDF / RGB raster).
 #pragma once
 
 #include <keel/array.h>
@@ -11,14 +11,10 @@
 #include <keel/string.h>
 #include <numkit/graphics/figure_render_state.hpp>
 
-
 namespace numkit {
 namespace figrender {
 
 const keel::u8 *namedPalette(keel::StringRef name, keel::i32 &n);
-
-void parseNestedDoubles(keel::StringRef j, keel::Array<keel::f64> &out,
-                        keel::usize &rows, keel::usize &cols);
 
 keel::Array<keel::f64> niceTicks(keel::f64 mn, keel::f64 mx, keel::i32 target = 10);
 keel::Array<keel::f64> logTicks(keel::f64 mn, keel::f64 mx);

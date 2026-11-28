@@ -3112,13 +3112,20 @@ TEST_P(DisplayTest, GraphicsHandleSurfaceGaps)
 
 TEST_P(DisplayTest, FigureExportGaps)
 {
+    const std::string tag = (engine.backend() == numkit::Engine::Backend::VM) ? "_vm" : "_tw";
+    const std::string fPdf = "numkit_test_surf" + tag + ".pdf";
+    const std::string fEps = "numkit_test_surf" + tag + ".eps";
+    const std::string fQ   = "numkit_test_quiver" + tag + ".svg";
+    const std::string fP   = "numkit_test_polar" + tag + ".svg";
+    const std::string fY   = "numkit_test_yy" + tag + ".svg";
+
     // 1. Vector PDF and EPS export (including 3-D surf).
     eval("close all; surf(peaks(6)); "
-         "saveas(gcf, 'numkit_test_surf.pdf'); "
-         "saveas(gcf, 'numkit_test_surf.eps'); "
-         "pdfTxt = fileread('numkit_test_surf.pdf'); "
-         "epsTxt = fileread('numkit_test_surf.eps'); "
-         "delete('numkit_test_surf.pdf'); delete('numkit_test_surf.eps');");
+         "saveas(gcf, '" + fPdf + "'); "
+         "saveas(gcf, '" + fEps + "'); "
+         "pdfTxt = fileread('" + fPdf + "'); "
+         "epsTxt = fileread('" + fEps + "'); "
+         "delete('" + fPdf + "'); delete('" + fEps + "');");
     ASSERT_NE(getVarPtr("pdfTxt"), nullptr);
     ASSERT_NE(getVarPtr("epsTxt"), nullptr);
     EXPECT_EQ(getVarPtr("pdfTxt")->toString().substr(0, 8), "%PDF-1.4");
@@ -3128,22 +3135,22 @@ TEST_P(DisplayTest, FigureExportGaps)
 
     // 2. Quiver, polarplot, and yyaxis right rendering in exported figures.
     eval("close all; quiver([0 1], [0 1], [2 -1], [1 2]); "
-         "exportgraphics(gcf, 'numkit_test_quiver.svg'); "
-         "qSvg = fileread('numkit_test_quiver.svg'); delete('numkit_test_quiver.svg');");
+         "exportgraphics(gcf, '" + fQ + "'); "
+         "qSvg = fileread('" + fQ + "'); delete('" + fQ + "');");
     ASSERT_NE(getVarPtr("qSvg"), nullptr);
     EXPECT_NE(getVarPtr("qSvg")->toString().find("<polyline"), std::string::npos);
 
     eval("close all; polarplot([0 pi/2 pi], [1 2 4]); title('PolarChart'); "
-         "saveas(gcf, 'numkit_test_polar.svg'); "
-         "pSvg = fileread('numkit_test_polar.svg'); delete('numkit_test_polar.svg');");
+         "saveas(gcf, '" + fP + "'); "
+         "pSvg = fileread('" + fP + "'); delete('" + fP + "');");
     ASSERT_NE(getVarPtr("pSvg"), nullptr);
     EXPECT_NE(getVarPtr("pSvg")->toString().find("PolarChart"), std::string::npos);
     EXPECT_NE(getVarPtr("pSvg")->toString().find("330"), std::string::npos);
 
     eval("close all; yyaxis left; plot([1 2 3], [1 2 3]); ylabel('LeftAxis'); "
          "yyaxis right; plot([1 2 3], [100 200 300]); ylabel('RightAxis'); "
-         "saveas(gcf, 'numkit_test_yy.svg'); "
-         "yySvg = fileread('numkit_test_yy.svg'); delete('numkit_test_yy.svg');");
+         "saveas(gcf, '" + fY + "'); "
+         "yySvg = fileread('" + fY + "'); delete('" + fY + "');");
     ASSERT_NE(getVarPtr("yySvg"), nullptr);
     EXPECT_NE(getVarPtr("yySvg")->toString().find("LeftAxis"), std::string::npos);
     EXPECT_NE(getVarPtr("yySvg")->toString().find("RightAxis"), std::string::npos);
