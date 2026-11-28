@@ -6,6 +6,7 @@
 #include <keel/core.h>
 #include <keel/font.h>
 #include <keel/format.h>
+#include <keel/math.h>
 #include <keel/ref.h>
 #include <keel/static_array.h>
 #include <keel/string.h>
@@ -15,11 +16,55 @@
 
 namespace numkit::figrender::detail {
 
+inline constexpr RenderRgb kAxisCol(0x26, 0x26, 0x26);
+inline constexpr RenderRgb kGridCol(0xe2, 0xe2, 0xe2);
+inline constexpr RenderRgb kMinorGridCol(0xf0, 0xf0, 0xf0);
+inline constexpr RenderRgb kTextCol(0x18, 0x18, 0x18);
+
 struct Rect {
     keel::f64 x0 = 0.0;
     keel::f64 y0 = 0.0;
     keel::f64 x1 = 0.0;
     keel::f64 y1 = 0.0;
+};
+
+struct AxisRange {
+    keel::f64 lo = 0.0;
+    keel::f64 hi = 1.0;
+    bool log = false;
+
+    keel::f64 map(keel::f64 v, keel::f64 p0, keel::f64 p1) const noexcept
+    {
+        keel::f64 t = 0.0;
+        if (log) {
+            const keel::f64 a = keel::log10(lo);
+            const keel::f64 b = keel::log10(hi);
+            t = (keel::log10(v) - a) / (b - a);
+        } else {
+            t = (v - lo) / (hi - lo);
+        }
+        return p0 + t * (p1 - p0);
+    }
+};
+
+struct PlotTransform {
+    Rect plot;
+    AxisRange xr;
+    AxisRange yr;
+    AxisRange yr2;
+    keel::f64 px0 = 0.0, px1 = 0.0;
+    keel::f64 py0 = 0.0, py1 = 0.0;
+
+    keel::f64 X(keel::f64 v) const noexcept { return xr.map(v, px0, px1); }
+    keel::f64 Y(keel::f64 v) const noexcept { return yr.map(v, py0, py1); }
+    keel::f64 Y2(keel::f64 v) const noexcept { return yr2.map(v, py0, py1); }
+    keel::f64 Ys(keel::f64 v, bool rightY) const noexcept { return rightY ? Y2(v) : Y(v); }
+    const AxisRange &yRange(bool rightY) const noexcept { return rightY ? yr2 : yr; }
+    bool markerInPlot(keel::f64 mx, keel::f64 my) const noexcept
+    {
+        return mx >= plot.x0 - 2.0 && mx <= plot.x1 + 2.0
+            && my >= plot.y0 - 2.0 && my <= plot.y1 + 2.0;
+    }
 };
 
 enum class TextVAlign : keel::u8 {
@@ -71,6 +116,14 @@ inline keel::String rgbHex(RenderRgb c)
                         keel::as<keel::u32>(c.b));
 }
 
+inline bool is3dDataset(const RenderDataset &ds) noexcept
+{
+    return ds.kind == RenderChartKind::Surface
+        || ds.kind == RenderChartKind::Mesh
+        || ds.kind == RenderChartKind::Waterfall
+        || (ds.kind == RenderChartKind::Plot3 && !ds.z.empty());
+}
+
 // ── Palette helpers (render_palette.cpp) ─────────────────────────────
 const keel::StaticArray<RenderRgb, 8> &seriesPalette() noexcept;
 RenderRgb sampleColormap(keel::f64 t, keel::StringRef cmapName,
@@ -84,7 +137,48 @@ keel::f64 measureTextWidthPx(keel::StringRef utf8Text, keel::f64 fontSizePx, boo
 keel::f64 fontCapHeightPx(keel::f64 fontSizePx, bool bold);
 const keel::u8 *font5x7(char c) noexcept;
 
-// ── Display-list builder (render_display.cpp) ────────────────────────
+// ── Display-list primitives (render_display.cpp) ─────────────────────
+void addLine(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
+             keel::ArrayRef<keel::f64> ys, RenderRgb c, keel::f64 w,
+             RenderLineStyle ls = RenderLineStyle::Solid);
+void addLine(keel::Array<Cmd> &out, std::initializer_list<keel::f64> xs,
+             std::initializer_list<keel::f64> ys, RenderRgb c, keel::f64 w,
+             RenderLineStyle ls = RenderLineStyle::Solid);
+void addClippedLine(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
+                    keel::ArrayRef<keel::f64> ys, const Rect &clip, RenderRgb c,
+                    keel::f64 w, RenderLineStyle ls);
+void addClippedSeg(keel::Array<Cmd> &out, keel::f64 x0, keel::f64 y0,
+                   keel::f64 x1, keel::f64 y1, const Rect &clip, RenderRgb c,
+                   keel::f64 w, RenderLineStyle ls = RenderLineStyle::Solid);
+void addPoly(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
+             keel::ArrayRef<keel::f64> ys, RenderRgb c, bool fill);
+void addPoly(keel::Array<Cmd> &out, std::initializer_list<keel::f64> xs,
+             std::initializer_list<keel::f64> ys, RenderRgb c, bool fill);
+void addMarker(keel::Array<Cmd> &out, keel::f64 x, keel::f64 y, keel::f64 size,
+               RenderRgb edgeColor, keel::StringRef kind, bool hasFill = false,
+               RenderRgb fillColor = RenderRgb(0, 0, 0), bool noEdge = false,
+               keel::f64 strokeW = 1.4);
+keel::f64 addAlignedText(keel::Array<Cmd> &out, keel::StringRef rawText,
+                         keel::f64 anchorX, keel::f64 anchorY,
+                         keel::f64 fontSizePx, RenderRgb color,
+                         RenderHAlign halign = RenderHAlign::Left,
+                         TextVAlign valign = TextVAlign::Baseline,
+                         bool rot90 = false, bool bold = false,
+                         keel::StringRef family = "");
+void renderTitleAndSubtitle(const RenderAxes &ax, const Rect &plot,
+                            keel::f64 uiScale, keel::f64 ptToPx, keel::Array<Cmd> &out);
+void renderLegend(const RenderAxes &ax, const Rect &plot,
+                  keel::f64 uiScale, keel::f64 ptToPx, keel::Array<Cmd> &out);
+
+// ── Specialized renderers ────────────────────────────────────────────
+void render2dSeries(const RenderAxes &ax, const PlotTransform &tf,
+                    keel::f64 uiScale, keel::f64 ptToPx, keel::Array<Cmd> &out);
+void renderPolarAxes(const RenderAxes &ax, const Rect &plot,
+                     keel::f64 uiScale, keel::f64 ptToPx, keel::Array<Cmd> &out);
+void render3dContent(const RenderAxes &ax, const Rect &plot,
+                     keel::f64 uiScale, keel::Array<Cmd> &out);
+
+// ── Top-level display-list entry point ───────────────────────────────
 keel::Array<Cmd> buildFigureDisplayList(const FigureState &fig, keel::i32 W, keel::i32 H);
 
 } // namespace numkit::figrender::detail

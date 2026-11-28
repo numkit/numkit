@@ -51,24 +51,34 @@ keel::String lowerExtOf(keel::StringRef path)
     return e;
 }
 
-// PNG + base64 data-URL embedder for SVG <image> elements. The buffer
-// arrives top-down row-major from figrender::imageCmdRgb; it goes to
-// imwriteToBytes as a column-major uint8 H×W×3 Value (the transpose is
-// the same column-major contract the raster export path uses).
+// Converts top-down row-major RGB buffer (H*W*3) to a column-major uint8 HxWx3 Value.
+Value rgbBufferToValue(keel::ArrayRef<keel::u8> rgb, keel::i32 w, keel::i32 h, keel::Allocator *mr)
+{
+    const keel::usize Hp = keel::as<keel::usize>(h);
+    const keel::usize Wp = keel::as<keel::usize>(w);
+    Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
+    keel::u8 *d = A.uint8DataMut();
+    for (keel::usize r = 0; r < Hp; ++r)
+        for (keel::usize c = 0; c < Wp; ++c)
+            for (keel::usize ch = 0; ch < 3; ++ch)
+                d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3u + ch];
+    return A;
+}
+
+void figureExportSize(const FigureState &fig, keel::i32 dpi, keel::i32 &W, keel::i32 &H) noexcept
+{
+    const keel::f64 figW = (fig.figWidth > 0.0) ? fig.figWidth : 560.0;
+    const keel::f64 figH = (fig.figHeight > 0.0) ? fig.figHeight : 420.0;
+    W = keel::max(64, keel::as<keel::i32>(keel::round_i64(figW * keel::as<keel::f64>(dpi) / 100.0)));
+    H = keel::max(64, keel::as<keel::i32>(keel::round_i64(figH * keel::as<keel::f64>(dpi) / 100.0)));
+}
+
 const char kBase64[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-figrender::SvgImageEmbedder svgPngEmbedder(
-    keel::Allocator *mr)
+figrender::SvgImageEmbedder svgPngEmbedder(keel::Allocator *mr)
 {
     return [mr](keel::ArrayRef<keel::u8> rgb, keel::i32 w, keel::i32 h) -> keel::String {
-        const keel::usize Hp = (keel::usize)h, Wp = (keel::usize)w;
-        Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
-        keel::u8 *d = A.uint8DataMut();
-        for (keel::usize r = 0; r < Hp; ++r)
-            for (keel::usize c = 0; c < Wp; ++c)
-                for (keel::usize ch = 0; ch < 3; ++ch)
-                    d[r + c * Hp + ch * Hp * Wp] =
-                        rgb[(r * Wp + c) * 3 + ch];
+        Value A = rgbBufferToValue(rgb, w, h, mr);
         keel::String png = image::imwriteToBytes(A, "png", mr);
         keel::String b64 = keel::String::from("data:image/png;base64,");
         b64.reserve(b64.size() + (png.size() / 3 + 1) * 4);
@@ -239,12 +249,8 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
     const FigureState *targetFig = ea.resolvedFigure();
     if (!targetFig)
         throw numkit::Error(keel::format("{}: no figure to export", who).c_str());
-    // Base canvas scales from Figure.Position (default 560×420 → 840×630 @150dpi;
-    // custom Position e.g. 1280×760 scales proportionally with dpi/100).
-    const keel::f64 figW = (targetFig->figWidth > 0.0) ? targetFig->figWidth : 560.0;
-    const keel::f64 figH = (targetFig->figHeight > 0.0) ? targetFig->figHeight : 420.0;
-    const keel::i32 W = keel::max(64, (keel::i32)keel::round_i64(figW * ea.dpi / 100.0));
-    const keel::i32 H = keel::max(64, (keel::i32)keel::round_i64(figH * ea.dpi / 100.0));
+    keel::i32 W = 0, H = 0;
+    figureExportSize(*targetFig, ea.dpi, W, H);
 
     auto rp = engine.resolvePath(ea.path);
     if (!rp.fs)
@@ -273,22 +279,8 @@ void runExport(Engine &engine, const ExportArgs &ea, const char *who)
             ".bmp .tga .pnm .tif) — bugs/opened/graphics/figure-export-gaps.md",
             who, ea.ext).c_str());
     }
-    // Raster formats → RGB buffer → image toolbox encoder.
-    keel::Array<keel::u8> rgb =
-        figrender::renderFigureRgb(*targetFig, W, H);
-    const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
-    Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8,
-                              engine.allocator());
-    keel::u8 *d = A.uint8DataMut();
-    // Value is COLUMN-MAJOR (MATLAB layout): d[r + c*H + ch*H*W]. The
-    // raster buffer is row-major top-down RGB — transpose into place
-    // (filling it linearly scrambles the image into crisscrossing
-    // diagonal noise).
-    for (keel::usize r = 0; r < Hp; ++r)
-        for (keel::usize c = 0; c < Wp; ++c)
-            for (keel::usize ch = 0; ch < 3; ++ch)
-                d[r + c * Hp + ch * Hp * Wp] =
-                    rgb[(r * Wp + c) * 3 + ch];
+    keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*targetFig, W, H);
+    Value A = rgbBufferToValue(rgb.as_ref(), W, H, engine.allocator());
     keel::String bytes = image::imwriteToBytes(A, ea.ext, engine.allocator());
     rp.fs->writeFileBytes(rp.path, bytes);
 }
@@ -328,17 +320,10 @@ void print_reg(keel::ArrayRef<Value> args, keel::usize,
         const FigureState *targetFig = ea.resolvedFigure();
         if (!targetFig)
             throw numkit::Error("print: no figure to export");
-        const keel::i32 W = keel::max(64, (keel::i32)(840.0 * ea.dpi / 150.0));
-        const keel::i32 H = keel::max(64, (keel::i32)(630.0 * ea.dpi / 150.0));
+        keel::i32 W = 0, H = 0;
+        figureExportSize(*targetFig, ea.dpi, W, H);
         keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*targetFig, W, H);
-        const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
-        Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, eng.allocator());
-        keel::u8 *d = A.uint8DataMut();
-        for (keel::usize r = 0; r < Hp; ++r)
-            for (keel::usize c = 0; c < Wp; ++c)
-                for (keel::usize ch = 0; ch < 3; ++ch)
-                    d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
-        outs[0] = keel::move(A);
+        outs[0] = rgbBufferToValue(rgb.as_ref(), W, H, eng.allocator());
         return;
     }
     runExport(eng, ea, "print");
@@ -398,17 +383,11 @@ void getframe_reg(keel::ArrayRef<Value> args, keel::usize,
         ea.hasFig = true;
         fig = ea.resolvedFigure();
     }
-    const keel::i32 W = 560, H = 420;
+    keel::i32 W = 0, H = 0;
+    figureExportSize(*fig, 100, W, H);
     keel::Array<keel::u8> rgb = figrender::renderFigureRgb(*fig, W, H);
-    const keel::usize Hp = (keel::usize)H, Wp = (keel::usize)W;
-    Value A = Value::matrix3d(Hp, Wp, 3, ValueType::UINT8, mr);
-    keel::u8 *d = A.uint8DataMut();
-    for (keel::usize r = 0; r < Hp; ++r)
-        for (keel::usize c = 0; c < Wp; ++c)
-            for (keel::usize ch = 0; ch < 3; ++ch)
-                d[r + c * Hp + ch * Hp * Wp] = rgb[(r * Wp + c) * 3 + ch];
     Value s = Value::structure(mr);
-    s.field("cdata") = keel::move(A);
+    s.field("cdata") = rgbBufferToValue(rgb.as_ref(), W, H, mr);
     s.field("colormap") = Value::Empty;
     if (!outs.empty()) outs[0] = keel::move(s);
 }

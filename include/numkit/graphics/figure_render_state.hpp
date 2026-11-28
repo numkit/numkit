@@ -80,6 +80,7 @@ struct RenderDataset {
     keel::Array<keel::f64> eNeg;    // ErrorBar YNegativeDelta
     keel::Array<keel::f64> ePos;    // ErrorBar YPositiveDelta
     keel::Array<keel::f64> sizes;   // Scatter SizeData
+    keel::Array<keel::f64> levels;  // Contour LevelList
 
     // Typed line & marker style
     RenderRgb color{0x00, 0x72, 0xbd};

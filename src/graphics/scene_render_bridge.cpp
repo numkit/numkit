@@ -314,6 +314,19 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
         if (asciiEqualNoCase(scene.getProperty(axId, "YTickLabelMode", mr).toString(), "manual"))
             dst.yTickLabels = extractStringList(scene.getProperty(axId, "YTickLabel", mr));
 
+        if (ax->xAxisId != kInvalidNodeId && scene.findNode(ax->xAxisId)
+            && scene.hasProperty(ax->xAxisId, "TickLabelFormat")) {
+            const keel::String fmt = scene.getProperty(ax->xAxisId, "TickLabelFormat", mr).toString();
+            if (!fmt.empty() && fmt != "%g")
+                dst.xTickFormat = fmt.clone();
+        }
+        if (ax->yAxisId != kInvalidNodeId && scene.findNode(ax->yAxisId)
+            && scene.hasProperty(ax->yAxisId, "TickLabelFormat")) {
+            const keel::String fmt = scene.getProperty(ax->yAxisId, "TickLabelFormat", mr).toString();
+            if (!fmt.empty() && fmt != "%g")
+                dst.yTickFormat = fmt.clone();
+        }
+
         if (scene.hasProperty(axId, "View")) {
             const Value vv = scene.getProperty(axId, "View", mr);
             if (vv.isNumeric() && vv.numel() >= 2) {
@@ -430,6 +443,8 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
             ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
             ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             extractMat2DRowMajor(scene.getProperty(cid, "ZData", mr), ds.z, ds.zRows, ds.zCols);
+            if (scene.hasProperty(cid, "LevelList"))
+                ds.levels = extractVec1D(scene.getProperty(cid, "LevelList", mr));
             break;
         }
         case ClassId::Stem: {

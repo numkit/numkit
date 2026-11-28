@@ -283,19 +283,67 @@ keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
             stream.append("> EI Q\n");
         } else if (c.kind == Cmd::Kind::Text) {
             const keel::String escaped = escapePsPdf(c.text);
-            keel::format_into(stream, "BT /F1 {:.1f} Tf {:.3f} {:.3f} {:.3f} rg {:.1f} {:.1f} Td ({}) Tj ET\n",
-                              c.fontSize, r, g, b, c.x, keel::as<keel::f64>(H) - c.y, escaped);
+            const keel::f64 py = keel::as<keel::f64>(H) - c.y;
+            if (c.rot90) {
+                keel::format_into(stream,
+                    "BT /F1 {:.1f} Tf {:.3f} {:.3f} {:.3f} rg 0 1 -1 0 {:.1f} {:.1f} Tm ({}) Tj ET\n",
+                    c.fontSize, r, g, b, c.x, py, escaped);
+            } else {
+                keel::format_into(stream,
+                    "BT /F1 {:.1f} Tf {:.3f} {:.3f} {:.3f} rg {:.1f} {:.1f} Td ({}) Tj ET\n",
+                    c.fontSize, r, g, b, c.x, py, escaped);
+            }
         } else if (c.kind == Cmd::Kind::Mark) {
             const keel::f64 rad = c.width * 0.5;
             const keel::f64 py = keel::as<keel::f64>(H) - c.y;
-            if (c.fill) {
-                keel::format_into(stream, "{:.3f} {:.3f} {:.3f} rg {:.1f} {:.1f} {:.1f} {:.1f} re f\n",
-                                  c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0,
-                                  c.x - rad, py - rad, c.width, c.width);
-            }
-            if (!c.noEdge) {
-                keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w {:.1f} {:.1f} {:.1f} {:.1f} re S\n",
-                                  r, g, b, c.strokeWidth, c.x - rad, py - rad, c.width, c.width);
+            const keel::f64 k = 0.5522847498 * rad;
+            auto appendCirclePath = [&](keel::String &dst) {
+                keel::format_into(dst,
+                    "{:.2f} {:.2f} m "
+                    "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c "
+                    "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c "
+                    "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c "
+                    "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c h ",
+                    c.x + rad, py,
+                    c.x + rad, py + k, c.x + k, py + rad, c.x, py + rad,
+                    c.x - k, py + rad, c.x - rad, py + k, c.x - rad, py,
+                    c.x - rad, py - k, c.x - k, py - rad, c.x, py - rad,
+                    c.x + k, py - rad, c.x + rad, py - k, c.x + rad, py);
+            };
+            if (c.text == "s" || c.text == "d") {
+                if (c.fill) {
+                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} rg {:.1f} {:.1f} {:.1f} {:.1f} re f\n",
+                                      c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0,
+                                      c.x - rad, py - rad, c.width, c.width);
+                }
+                if (!c.noEdge) {
+                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d {:.1f} {:.1f} {:.1f} {:.1f} re S\n",
+                                      r, g, b, c.strokeWidth, c.x - rad, py - rad, c.width, c.width);
+                }
+            } else if (c.text == "+" || c.text == "x") {
+                keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d ",
+                                  r, g, b, c.strokeWidth);
+                if (c.text == "+") {
+                    keel::format_into(stream, "{:.1f} {:.1f} m {:.1f} {:.1f} l {:.1f} {:.1f} m {:.1f} {:.1f} l S\n",
+                                      c.x - rad, py, c.x + rad, py, c.x, py - rad, c.x, py + rad);
+                } else {
+                    keel::format_into(stream, "{:.1f} {:.1f} m {:.1f} {:.1f} l {:.1f} {:.1f} m {:.1f} {:.1f} l S\n",
+                                      c.x - rad, py - rad, c.x + rad, py + rad,
+                                      c.x + rad, py - rad, c.x - rad, py + rad);
+                }
+            } else {
+                if (c.fill) {
+                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} rg ",
+                                      c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0);
+                    appendCirclePath(stream);
+                    stream.append("f\n");
+                }
+                if (!c.noEdge) {
+                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d ",
+                                      r, g, b, c.strokeWidth);
+                    appendCirclePath(stream);
+                    stream.append("S\n");
+                }
             }
         } else if ((c.kind == Cmd::Kind::Line || c.kind == Cmd::Kind::Poly) && c.xs.size() >= 2) {
             keel::format_into(stream, "{:.3f} {:.3f} {:.3f} {} {:.2f} w {} {:.1f} {:.1f} m\n",
