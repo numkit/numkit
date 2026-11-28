@@ -16,6 +16,18 @@ namespace {
 
 using detail::Cmd;
 
+bool allFiniteCoords(const Cmd &c) noexcept
+{
+    if (c.kind == Cmd::Kind::Text || c.kind == Cmd::Kind::Mark)
+        return keel::is_finite(c.x) && keel::is_finite(c.y);
+    const keel::usize n = keel::min(c.xs.size(), c.ys.size());
+    for (keel::usize i = 0; i < n; ++i) {
+        if (!keel::is_finite(c.xs[i]) || !keel::is_finite(c.ys[i]))
+            return false;
+    }
+    return true;
+}
+
 keel::String escapeXml(keel::StringRef t)
 {
     keel::String o;
@@ -45,7 +57,7 @@ keel::String escapePsPdf(keel::StringRef t)
 void appendFixed(keel::String &dst, keel::f64 v)
 {
     char b[64];
-    dst.append(keel::format_f64_fixed_to(b, v, 6));
+    dst.append(keel::format_f64_fixed_to(b, keel::is_finite(v) ? v : 0.0, 6));
 }
 
 const char *svgDashArray(RenderLineStyle ls) noexcept
@@ -92,8 +104,10 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
         W, H, W, H, detail::rgbHex(fig.bgColor));
 
     for (const Cmd &c : cmds) {
+        if (!allFiniteCoords(c))
+            continue;
         if (c.kind == Cmd::Kind::Image) {
-            if (!embed)
+            if (!embed || c.xs.size() < 2 || c.ys.size() < 2)
                 continue;
             const keel::Array<keel::u8> buf = detail::imageCmdRgb(c);
             const keel::i32 pw = keel::max(1, keel::as<keel::i32>(keel::round_i64(
@@ -126,35 +140,51 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
             s.append(escapeXml(c.text));
             s.append("</text>\n");
         } else if (c.kind == Cmd::Kind::Mark) {
-            const keel::f64 r = c.width * 0.5;
+            const keel::f64 r = keel::max(2.0, c.width * 0.5);
             const keel::String colHex = detail::rgbHex(c.color);
             const keel::String fillHex = c.fill ? detail::rgbHex(c.fillColor) : keel::String::from("none");
             const keel::StringRef strokeStr = c.noEdge ? keel::StringRef("none") : colHex.as_ref();
-            if (c.text == "s" || c.text == "d") {
-                s.append("<rect x=\""); appendFixed(s, c.x - r);
-                s.append("\" y=\""); appendFixed(s, c.y - r);
-                s.append("\" width=\""); appendFixed(s, c.width);
-                s.append("\" height=\""); appendFixed(s, c.width);
+            const char glyph = detail::canonicalMarkerGlyph(c.text);
+
+            keel::f64 vx[12], vy[12];
+            const keel::i32 nv = detail::buildMarkerPolygon(glyph, c.x, c.y, r, vx, vy);
+            if (nv > 0) {
+                s.append("<polygon points=\"");
+                for (keel::i32 i = 0; i < nv; ++i) {
+                    if (i) s.push_back(' ');
+                    keel::format_into(s, "{:.2f},{:.2f}", vx[i], vy[i]);
+                }
                 s.append("\" fill=\""); s.append(fillHex);
                 s.append("\" stroke=\""); s.append(strokeStr);
                 s.append("\" stroke-width=\""); appendFixed(s, c.strokeWidth);
                 s.append("\"/>\n");
-            } else if (c.text == "+" || c.text == "x") {
+            } else if (glyph == '+' || glyph == 'x' || glyph == '*') {
                 s.append("<path d=\"");
-                if (c.text == "+") {
-                    s.append("M"); appendFixed(s, c.x - r); s.push_back(' '); appendFixed(s, c.y);
-                    s.append(" L"); appendFixed(s, c.x + r); s.push_back(' '); appendFixed(s, c.y);
-                    s.append(" M"); appendFixed(s, c.x); s.push_back(' '); appendFixed(s, c.y - r);
-                    s.append(" L"); appendFixed(s, c.x); s.push_back(' '); appendFixed(s, c.y + r);
-                } else {
-                    s.append("M"); appendFixed(s, c.x - r); s.push_back(' '); appendFixed(s, c.y - r);
-                    s.append(" L"); appendFixed(s, c.x + r); s.push_back(' '); appendFixed(s, c.y + r);
-                    s.append(" M"); appendFixed(s, c.x + r); s.push_back(' '); appendFixed(s, c.y - r);
-                    s.append(" L"); appendFixed(s, c.x - r); s.push_back(' '); appendFixed(s, c.y + r);
+                bool firstSeg = true;
+                auto addSeg = [&](keel::f64 x0, keel::f64 y0, keel::f64 x1, keel::f64 y1) {
+                    if (!firstSeg) s.push_back(' ');
+                    firstSeg = false;
+                    s.push_back('M'); appendFixed(s, x0); s.push_back(' '); appendFixed(s, y0);
+                    s.append(" L"); appendFixed(s, x1); s.push_back(' '); appendFixed(s, y1);
+                };
+                if (glyph == '+' || glyph == '*') {
+                    addSeg(c.x - r, c.y, c.x + r, c.y);
+                    addSeg(c.x, c.y - r, c.x, c.y + r);
+                }
+                if (glyph == 'x' || glyph == '*') {
+                    const keel::f64 d2 = r * 0.70710678;
+                    addSeg(c.x - d2, c.y - d2, c.x + d2, c.y + d2);
+                    addSeg(c.x + d2, c.y - d2, c.x - d2, c.y + d2);
                 }
                 s.append("\" stroke=\""); s.append(colHex);
                 s.append("\" stroke-width=\""); appendFixed(s, c.strokeWidth);
                 s.append("\" fill=\"none\"/>\n");
+            } else if (glyph == '.') {
+                s.append("<circle cx=\""); appendFixed(s, c.x);
+                s.append("\" cy=\""); appendFixed(s, c.y);
+                s.append("\" r=\""); appendFixed(s, keel::max(1.5, r * 0.45));
+                s.append("\" fill=\""); s.append(colHex);
+                s.append("\" stroke=\"none\"/>\n");
             } else {
                 s.append("<circle cx=\""); appendFixed(s, c.x);
                 s.append("\" cy=\""); appendFixed(s, c.y);
@@ -164,9 +194,10 @@ keel::String renderFigureSvg(const FigureState &fig, keel::i32 W, keel::i32 H,
                 s.append("\" stroke-width=\""); appendFixed(s, c.strokeWidth);
                 s.append("\"/>\n");
             }
-        } else {
+        } else if (c.xs.size() >= 2 && c.ys.size() >= 2) {
+            const keel::usize n = keel::min(c.xs.size(), c.ys.size());
             keel::String pts;
-            for (keel::usize i = 0; i < c.xs.size(); ++i) {
+            for (keel::usize i = 0; i < n; ++i) {
                 if (i) pts.push_back(' ');
                 keel::format_into(pts, "{:.1f},{:.1f}", c.xs[i], c.ys[i]);
             }
@@ -205,9 +236,12 @@ keel::String renderFigureEps(const FigureState &fig, keel::i32 W, keel::i32 H)
 
     static const char kHex[] = "0123456789abcdef";
     for (const Cmd &c : cmds) {
+        if (!allFiniteCoords(c))
+            continue;
         keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor\n",
                           c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0);
         if (c.kind == Cmd::Kind::Image) {
+            if (c.xs.size() < 2 || c.ys.size() < 2) continue;
             const keel::Array<keel::u8> rgb = detail::imageCmdRgb(c);
             const keel::f64 sx0 = keel::min(c.xs[0], c.xs[1]), sx1 = keel::max(c.xs[0], c.xs[1]);
             const keel::f64 sy0 = keel::min(c.ys[0], c.ys[1]), sy1 = keel::max(c.ys[0], c.ys[1]);
@@ -232,23 +266,64 @@ keel::String renderFigureEps(const FigureState &fig, keel::i32 W, keel::i32 H)
                                   psFont, c.fontSize, c.x, keel::as<keel::f64>(H) - c.y, escaped);
             }
         } else if (c.kind == Cmd::Kind::Mark) {
-            const keel::f64 r = c.width * 0.5;
+            const keel::f64 rad = keel::max(2.0, c.width * 0.5);
             const keel::f64 py = keel::as<keel::f64>(H) - c.y;
-            if (c.fill) {
-                keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor newpath {:.1f} {:.1f} {:.1f} 0 360 arc fill\n",
-                                  c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0,
-                                  c.x, py, r);
+            const char glyph = detail::canonicalMarkerGlyph(c.text);
+            keel::f64 vx[12], vy[12];
+            const keel::i32 nv = detail::buildMarkerPolygon(glyph, c.x, c.y, rad, vx, vy);
+            if (nv > 0) {
+                auto appendPsPoly = [&]() {
+                    keel::format_into(s, "newpath {:.2f} {:.2f} moveto ",
+                                      vx[0], keel::as<keel::f64>(H) - vy[0]);
+                    for (keel::i32 i = 1; i < nv; ++i)
+                        keel::format_into(s, "{:.2f} {:.2f} lineto ", vx[i], keel::as<keel::f64>(H) - vy[i]);
+                    s.append("closepath ");
+                };
+                if (c.fill) {
+                    keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor ",
+                                      c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0);
+                    appendPsPoly();
+                    s.append("fill\n");
+                }
+                if (!c.noEdge) {
+                    keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor {:.2f} setlinewidth [] 0 setdash ",
+                                      c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0, c.strokeWidth);
+                    appendPsPoly();
+                    s.append("stroke\n");
+                }
+            } else if (glyph == '+' || glyph == 'x' || glyph == '*') {
+                keel::format_into(s, "{:.2f} setlinewidth [] 0 setdash newpath ", c.strokeWidth);
+                if (glyph == '+' || glyph == '*') {
+                    keel::format_into(s, "{:.2f} {:.2f} moveto {:.2f} {:.2f} lineto {:.2f} {:.2f} moveto {:.2f} {:.2f} lineto ",
+                                      c.x - rad, py, c.x + rad, py, c.x, py - rad, c.x, py + rad);
+                }
+                if (glyph == 'x' || glyph == '*') {
+                    const keel::f64 d2 = rad * 0.70710678;
+                    keel::format_into(s, "{:.2f} {:.2f} moveto {:.2f} {:.2f} lineto {:.2f} {:.2f} moveto {:.2f} {:.2f} lineto ",
+                                      c.x - d2, py - d2, c.x + d2, py + d2, c.x + d2, py - d2, c.x - d2, py + d2);
+                }
+                s.append("stroke\n");
+            } else if (glyph == '.') {
+                keel::format_into(s, "newpath {:.2f} {:.2f} {:.2f} 0 360 arc fill\n",
+                                  c.x, py, keel::max(1.5, rad * 0.45));
+            } else {
+                if (c.fill) {
+                    keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor newpath {:.1f} {:.1f} {:.1f} 0 360 arc fill\n",
+                                      c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0,
+                                      c.x, py, rad);
+                }
+                if (!c.noEdge) {
+                    keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor {:.2f} setlinewidth [] 0 setdash newpath {:.1f} {:.1f} {:.1f} 0 360 arc stroke\n",
+                                      c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0,
+                                      c.strokeWidth, c.x, py, rad);
+                }
             }
-            if (!c.noEdge) {
-                keel::format_into(s, "{:.3f} {:.3f} {:.3f} setrgbcolor {:.2f} setlinewidth newpath {:.1f} {:.1f} {:.1f} 0 360 arc stroke\n",
-                                  c.color.r / 255.0, c.color.g / 255.0, c.color.b / 255.0,
-                                  c.strokeWidth, c.x, py, r);
-            }
-        } else if ((c.kind == Cmd::Kind::Line || c.kind == Cmd::Kind::Poly) && c.xs.size() >= 2) {
+        } else if ((c.kind == Cmd::Kind::Line || c.kind == Cmd::Kind::Poly) && c.xs.size() >= 2 && c.ys.size() >= 2) {
+            const keel::usize n = keel::min(c.xs.size(), c.ys.size());
             keel::format_into(s, "{:.2f} setlinewidth {} newpath {:.1f} {:.1f} moveto\n",
                               c.width, psDashSpec(c.lineStyle),
                               c.xs[0], keel::as<keel::f64>(H) - c.ys[0]);
-            for (keel::usize i = 1; i < c.xs.size(); ++i)
+            for (keel::usize i = 1; i < n; ++i)
                 keel::format_into(s, "{:.1f} {:.1f} lineto\n", c.xs[i], keel::as<keel::f64>(H) - c.ys[i]);
             s.append((c.kind == Cmd::Kind::Poly && c.fill) ? "closepath fill\n" : "stroke\n");
         }
@@ -266,8 +341,11 @@ keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
 
     static const char kHex[] = "0123456789abcdef";
     for (const Cmd &c : cmds) {
+        if (!allFiniteCoords(c))
+            continue;
         const keel::f64 r = c.color.r / 255.0, g = c.color.g / 255.0, b = c.color.b / 255.0;
         if (c.kind == Cmd::Kind::Image) {
+            if (c.xs.size() < 2 || c.ys.size() < 2) continue;
             const keel::Array<keel::u8> rgb = detail::imageCmdRgb(c);
             const keel::f64 sx0 = keel::min(c.xs[0], c.xs[1]), sx1 = keel::max(c.xs[0], c.xs[1]);
             const keel::f64 sy0 = keel::min(c.ys[0], c.ys[1]), sy1 = keel::max(c.ys[0], c.ys[1]);
@@ -294,63 +372,84 @@ keel::String renderFigurePdf(const FigureState &fig, keel::i32 W, keel::i32 H)
                     c.fontSize, r, g, b, c.x, py, escaped);
             }
         } else if (c.kind == Cmd::Kind::Mark) {
-            const keel::f64 rad = c.width * 0.5;
+            const keel::f64 rad = keel::max(2.0, c.width * 0.5);
             const keel::f64 py = keel::as<keel::f64>(H) - c.y;
-            const keel::f64 k = 0.5522847498 * rad;
-            auto appendCirclePath = [&](keel::String &dst) {
+            const char glyph = detail::canonicalMarkerGlyph(c.text);
+
+            auto appendCirclePath = [&](keel::String &dst, keel::f64 cr) {
+                const keel::f64 k = 0.5522847498 * cr;
                 keel::format_into(dst,
                     "{:.2f} {:.2f} m "
                     "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c "
                     "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c "
                     "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c "
                     "{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} c h ",
-                    c.x + rad, py,
-                    c.x + rad, py + k, c.x + k, py + rad, c.x, py + rad,
-                    c.x - k, py + rad, c.x - rad, py + k, c.x - rad, py,
-                    c.x - rad, py - k, c.x - k, py - rad, c.x, py - rad,
-                    c.x + k, py - rad, c.x + rad, py - k, c.x + rad, py);
+                    c.x + cr, py,
+                    c.x + cr, py + k, c.x + k, py + cr, c.x, py + cr,
+                    c.x - k, py + cr, c.x - cr, py + k, c.x - cr, py,
+                    c.x - cr, py - k, c.x - k, py - cr, c.x, py - cr,
+                    c.x + k, py - cr, c.x + cr, py - k, c.x + cr, py);
             };
-            if (c.text == "s" || c.text == "d") {
-                if (c.fill) {
-                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} rg {:.1f} {:.1f} {:.1f} {:.1f} re f\n",
-                                      c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0,
-                                      c.x - rad, py - rad, c.width, c.width);
-                }
-                if (!c.noEdge) {
-                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d {:.1f} {:.1f} {:.1f} {:.1f} re S\n",
-                                      r, g, b, c.strokeWidth, c.x - rad, py - rad, c.width, c.width);
-                }
-            } else if (c.text == "+" || c.text == "x") {
-                keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d ",
-                                  r, g, b, c.strokeWidth);
-                if (c.text == "+") {
-                    keel::format_into(stream, "{:.1f} {:.1f} m {:.1f} {:.1f} l {:.1f} {:.1f} m {:.1f} {:.1f} l S\n",
-                                      c.x - rad, py, c.x + rad, py, c.x, py - rad, c.x, py + rad);
-                } else {
-                    keel::format_into(stream, "{:.1f} {:.1f} m {:.1f} {:.1f} l {:.1f} {:.1f} m {:.1f} {:.1f} l S\n",
-                                      c.x - rad, py - rad, c.x + rad, py + rad,
-                                      c.x + rad, py - rad, c.x - rad, py + rad);
-                }
-            } else {
+
+            keel::f64 vx[12], vy[12];
+            const keel::i32 nv = detail::buildMarkerPolygon(glyph, c.x, c.y, rad, vx, vy);
+            if (nv > 0) {
+                auto appendPolyPath = [&](keel::String &dst) {
+                    keel::format_into(dst, "{:.2f} {:.2f} m ", vx[0], keel::as<keel::f64>(H) - vy[0]);
+                    for (keel::i32 i = 1; i < nv; ++i)
+                        keel::format_into(dst, "{:.2f} {:.2f} l ", vx[i], keel::as<keel::f64>(H) - vy[i]);
+                    dst.append("h ");
+                };
                 if (c.fill) {
                     keel::format_into(stream, "{:.3f} {:.3f} {:.3f} rg ",
                                       c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0);
-                    appendCirclePath(stream);
+                    appendPolyPath(stream);
                     stream.append("f\n");
                 }
                 if (!c.noEdge) {
                     keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d ",
                                       r, g, b, c.strokeWidth);
-                    appendCirclePath(stream);
+                    appendPolyPath(stream);
+                    stream.append("S\n");
+                }
+            } else if (glyph == '+' || glyph == 'x' || glyph == '*') {
+                keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d ",
+                                  r, g, b, c.strokeWidth);
+                if (glyph == '+' || glyph == '*') {
+                    keel::format_into(stream, "{:.2f} {:.2f} m {:.2f} {:.2f} l {:.2f} {:.2f} m {:.2f} {:.2f} l ",
+                                      c.x - rad, py, c.x + rad, py, c.x, py - rad, c.x, py + rad);
+                }
+                if (glyph == 'x' || glyph == '*') {
+                    const keel::f64 d2 = rad * 0.70710678;
+                    keel::format_into(stream, "{:.2f} {:.2f} m {:.2f} {:.2f} l {:.2f} {:.2f} m {:.2f} {:.2f} l ",
+                                      c.x - d2, py - d2, c.x + d2, py + d2, c.x + d2, py - d2, c.x - d2, py + d2);
+                }
+                stream.append("S\n");
+            } else if (glyph == '.') {
+                keel::format_into(stream, "{:.3f} {:.3f} {:.3f} rg ", r, g, b);
+                appendCirclePath(stream, keel::max(1.5, rad * 0.45));
+                stream.append("f\n");
+            } else {
+                if (c.fill) {
+                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} rg ",
+                                      c.fillColor.r / 255.0, c.fillColor.g / 255.0, c.fillColor.b / 255.0);
+                    appendCirclePath(stream, rad);
+                    stream.append("f\n");
+                }
+                if (!c.noEdge) {
+                    keel::format_into(stream, "{:.3f} {:.3f} {:.3f} RG {:.2f} w [] 0 d ",
+                                      r, g, b, c.strokeWidth);
+                    appendCirclePath(stream, rad);
                     stream.append("S\n");
                 }
             }
-        } else if ((c.kind == Cmd::Kind::Line || c.kind == Cmd::Kind::Poly) && c.xs.size() >= 2) {
+        } else if ((c.kind == Cmd::Kind::Line || c.kind == Cmd::Kind::Poly) && c.xs.size() >= 2 && c.ys.size() >= 2) {
+            const keel::usize n = keel::min(c.xs.size(), c.ys.size());
             keel::format_into(stream, "{:.3f} {:.3f} {:.3f} {} {:.2f} w {} {:.1f} {:.1f} m\n",
                               r, g, b, (c.kind == Cmd::Kind::Poly && c.fill) ? "rg" : "RG",
                               c.width, pdfDashSpec(c.lineStyle),
                               c.xs[0], keel::as<keel::f64>(H) - c.ys[0]);
-            for (keel::usize i = 1; i < c.xs.size(); ++i)
+            for (keel::usize i = 1; i < n; ++i)
                 keel::format_into(stream, "{:.1f} {:.1f} l\n", c.xs[i], keel::as<keel::f64>(H) - c.ys[i]);
             stream.append((c.kind == Cmd::Kind::Poly && c.fill) ? "h f\n" : "S\n");
         }

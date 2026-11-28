@@ -144,8 +144,11 @@ void projectDatasetStyle(const GraphicsScene &scene, NodeId cid,
             ds.markerFaceColor = col;
             ds.hasMarkerFaceColor = true;
         } else if (mfc.isChar() || mfc.isString()) {
-            if (asciiEqualNoCase(mfc.toString(), "auto"))
+            const keel::String s = mfc.toString();
+            if (asciiEqualNoCase(s, "auto"))
                 ds.markerFaceAuto = true;
+            else if (asciiEqualNoCase(s, "flat"))
+                ds.markerFaceFlat = true;
         }
     }
 
@@ -155,8 +158,11 @@ void projectDatasetStyle(const GraphicsScene &scene, NodeId cid,
             ds.markerEdgeColor = col;
             ds.hasMarkerEdgeColor = true;
         } else if (mec.isChar() || mec.isString()) {
-            if (asciiEqualNoCase(mec.toString(), "none"))
+            const keel::String s = mec.toString();
+            if (asciiEqualNoCase(s, "none"))
                 ds.markerEdgeNone = true;
+            else if (asciiEqualNoCase(s, "flat"))
+                ds.markerEdgeFlat = true;
         }
     }
 
@@ -164,9 +170,14 @@ void projectDatasetStyle(const GraphicsScene &scene, NodeId cid,
         ds.faceColor = col;
         ds.hasFaceColor = true;
     }
-    if (scene.hasProperty(cid, "EdgeColor") && extractRgb(scene.getProperty(cid, "EdgeColor", mr), col)) {
-        ds.edgeColor = col;
-        ds.hasEdgeColor = true;
+    if (scene.hasProperty(cid, "EdgeColor")) {
+        const Value ec = scene.getProperty(cid, "EdgeColor", mr);
+        if (extractRgb(ec, col)) {
+            ds.edgeColor = col;
+            ds.hasEdgeColor = true;
+        } else if ((ec.isChar() || ec.isString()) && asciiEqualNoCase(ec.toString(), "none")) {
+            ds.edgeNone = true;
+        }
     }
     if (scene.hasProperty(cid, "FaceAlpha")) {
         const Value fa = scene.getProperty(cid, "FaceAlpha", mr);
@@ -300,10 +311,10 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
         extractLimitPair(scene, axId, "YLim", mr, dst.hasYLim, dst.yLo, dst.yHi);
         if (asciiEqualNoCase(scene.getProperty(axId, "ZLimMode", mr).toString(), "manual"))
             extractLimitPair(scene, axId, "ZLim", mr, dst.hasZLim, dst.zLo, dst.zHi);
-        if (scene.hasProperty(axId, "CLimMode")
-            && asciiEqualNoCase(scene.getProperty(axId, "CLimMode", mr).toString(), "manual")) {
+        const bool manualCLim = scene.hasProperty(axId, "CLimMode")
+            && asciiEqualNoCase(scene.getProperty(axId, "CLimMode", mr).toString(), "manual");
+        if (manualCLim || ax->boundsAnyC)
             extractLimitPair(scene, axId, "CLim", mr, dst.hasCLim, dst.cLo, dst.cHi);
-        }
 
         if (asciiEqualNoCase(scene.getProperty(axId, "XTickMode", mr).toString(), "manual"))
             dst.xTicks = extractVec1D(scene.getProperty(axId, "XTick", mr));
@@ -409,12 +420,45 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
             ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             if (scene.hasProperty(cid, "SizeData"))
                 ds.sizes = extractVec1D(scene.getProperty(cid, "SizeData", mr));
+            if (scene.hasProperty(cid, "CData")) {
+                const Value cd = scene.getProperty(cid, "CData", mr);
+                const keel::usize nPts = keel::min(ds.x.size(), ds.y.size());
+                if (cd.isNumeric() && !cd.isEmpty() && nPts > 0) {
+                    if (cd.dims().rows() == nPts && cd.dims().cols() == 3 && nPts > 1) {
+                        ds.cdataCols = 3;
+                        ds.cdata.resize(nPts * 3);
+                        for (keel::usize r = 0; r < nPts; ++r) {
+                            ds.cdata[r * 3 + 0] = cd.elemAsDouble(r + 0 * nPts);
+                            ds.cdata[r * 3 + 1] = cd.elemAsDouble(r + 1 * nPts);
+                            ds.cdata[r * 3 + 2] = cd.elemAsDouble(r + 2 * nPts);
+                        }
+                    } else if (cd.numel() == nPts
+                               && !(cd.dims().rows() == 1 && cd.dims().cols() == 3 && nPts == 3)) {
+                        ds.cdataCols = 1;
+                        ds.cdata = extractVec1D(cd);
+                    }
+                }
+            }
             break;
         }
         case ClassId::Bar: {
             ds.kind = RenderChartKind::Bar;
             ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
             ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            if (scene.hasProperty(cid, "BarWidth")) {
+                const keel::f64 bw = scene.getProperty(cid, "BarWidth", mr).toScalar();
+                if (keel::is_finite(bw) && bw > 0.0)
+                    ds.barWidth = bw;
+            }
+            if (scene.hasProperty(cid, "BarLayout"))
+                ds.barStacked = asciiEqualNoCase(scene.getProperty(cid, "BarLayout", mr).toString(), "stacked");
+            if (scene.hasProperty(cid, "Horizontal"))
+                ds.barHorizontal = asciiEqualNoCase(scene.getProperty(cid, "Horizontal", mr).toString(), "on");
+            if (scene.hasProperty(cid, "BaseValue")) {
+                const keel::f64 bv = scene.getProperty(cid, "BaseValue", mr).toScalar();
+                if (keel::is_finite(bv))
+                    ds.baseValue = bv;
+            }
             break;
         }
         case ClassId::Surface: {
@@ -436,6 +480,13 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
             ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
             ds.u = extractVec1D(scene.getProperty(cid, "UData", mr));
             ds.v = extractVec1D(scene.getProperty(cid, "VData", mr));
+            if (scene.hasProperty(cid, "AutoScale"))
+                ds.quiverAutoScale = !asciiEqualNoCase(scene.getProperty(cid, "AutoScale", mr).toString(), "off");
+            if (scene.hasProperty(cid, "AutoScaleFactor")) {
+                const keel::f64 af = scene.getProperty(cid, "AutoScaleFactor", mr).toScalar();
+                if (keel::is_finite(af) && af > 0.0)
+                    ds.quiverAutoScaleFactor = af;
+            }
             break;
         }
         case ClassId::Contour: {
@@ -445,6 +496,11 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
             extractMat2DRowMajor(scene.getProperty(cid, "ZData", mr), ds.z, ds.zRows, ds.zCols);
             if (scene.hasProperty(cid, "LevelList"))
                 ds.levels = extractVec1D(scene.getProperty(cid, "LevelList", mr));
+            if (scene.hasProperty(cid, "FaceColor")) {
+                const Value fc = scene.getProperty(cid, "FaceColor", mr);
+                if (fc.isNumeric() || ((fc.isChar() || fc.isString()) && !asciiEqualNoCase(fc.toString(), "none")))
+                    ds.contourFilled = true;
+            }
             break;
         }
         case ClassId::Stem: {

@@ -157,6 +157,9 @@ void dataRange(keel::ArrayRef<keel::f64> v, keel::f64 &lo, keel::f64 &hi) noexce
 bool clipSegmentToRect(keel::f64 &x0, keel::f64 &y0, keel::f64 &x1, keel::f64 &y1,
                        const Rect &r) noexcept
 {
+    if (!keel::is_finite(x0) || !keel::is_finite(y0)
+        || !keel::is_finite(x1) || !keel::is_finite(y1))
+        return false;
     const keel::f64 dx = x1 - x0;
     const keel::f64 dy = y1 - y0;
     keel::f64 t0 = 0.0, t1 = 1.0;
@@ -247,12 +250,36 @@ void renderColorbar(const RenderAxes &ax, const Rect &plot, keel::StringRef cbSi
         lo = ax.cLo;
         hi = ax.cHi;
     } else {
+        bool foundC = false;
+        keel::f64 fLo = +keel::kInf, fHi = -keel::kInf;
         for (const auto &ds : ax.datasets) {
+            if (!ds.visible) continue;
             if (ds.kind == RenderChartKind::ImageIndexed && !ds.imagePixels.empty()) {
-                lo = ds.cmin;
-                hi = ds.cmax;
-                break;
+                fLo = keel::min(fLo, ds.cmin);
+                fHi = keel::max(fHi, ds.cmax);
+                foundC = true;
+            } else if ((ds.kind == RenderChartKind::Contour || ds.kind == RenderChartKind::Surface
+                        || ds.kind == RenderChartKind::Mesh) && !ds.z.empty()) {
+                keel::f64 a = 0.0, b = 0.0;
+                dataRange(ds.z.as_ref(), a, b);
+                if (keel::is_finite(a) && keel::is_finite(b)) {
+                    fLo = keel::min(fLo, a);
+                    fHi = keel::max(fHi, b);
+                    foundC = true;
+                }
+            } else if (ds.kind == RenderChartKind::Scatter && ds.cdataCols == 1 && !ds.cdata.empty()) {
+                keel::f64 a = 0.0, b = 0.0;
+                dataRange(ds.cdata.as_ref(), a, b);
+                if (keel::is_finite(a) && keel::is_finite(b)) {
+                    fLo = keel::min(fLo, a);
+                    fHi = keel::max(fHi, b);
+                    foundC = true;
+                }
             }
+        }
+        if (foundC && fHi > fLo) {
+            lo = fLo;
+            hi = fHi;
         }
     }
 
@@ -451,6 +478,26 @@ void computeAxesBounds(const RenderAxes &ax, PlotTransform &tf, bool &has3dOut)
         if (ds.kind == RenderChartKind::Text) continue;
         ++seriesCount;
 
+        if (ds.kind == RenderChartKind::Bar && ds.barHorizontal) {
+            // Horizontal barh: XData holds categories (Y axis), YData holds values (X axis).
+            if (!ds.y.empty()) {
+                keel::f64 a = 0.0, b = 0.0;
+                dataRange(ds.y.as_ref(), a, b);
+                xlo = keel::min(xlo, keel::min(a, ds.baseValue));
+                xhi = keel::max(xhi, keel::max(b, ds.baseValue));
+            }
+            if (!ds.x.empty()) {
+                keel::f64 a = 0.0, b = 0.0;
+                dataRange(ds.x.as_ref(), a, b);
+                const bool isRightY = ax.yyEnabled && ds.rightYAxis;
+                keel::f64 &curYlo = isRightY ? y2lo : ylo;
+                keel::f64 &curYhi = isRightY ? y2hi : yhi;
+                curYlo = keel::min(curYlo, a - 0.5);
+                curYhi = keel::max(curYhi, b + 0.5);
+            }
+            continue;
+        }
+
         if (!ds.x.empty()) {
             keel::f64 a = 0.0, b = 0.0;
             dataRange(ds.x.as_ref(), a, b);
@@ -472,12 +519,15 @@ void computeAxesBounds(const RenderAxes &ax, PlotTransform &tf, bool &has3dOut)
             curYlo = keel::min(curYlo, 1.0); curYhi = keel::max(curYhi, keel::as<keel::f64>(ds.zRows));
         }
         if (ds.kind == RenderChartKind::Quiver) {
+            const keel::f64 qScale = computeQuiverScale(ds);
             const keel::usize nq = keel::min(ds.x.size(), ds.y.size());
             for (keel::usize k = 0; k < nq && k < ds.u.size(); ++k) {
-                xlo = keel::min(xlo, ds.x[k] + ds.u[k]); xhi = keel::max(xhi, ds.x[k] + ds.u[k]);
+                const keel::f64 tx = ds.x[k] + ds.u[k] * qScale;
+                if (keel::is_finite(tx)) { xlo = keel::min(xlo, tx); xhi = keel::max(xhi, tx); }
             }
             for (keel::usize k = 0; k < nq && k < ds.v.size(); ++k) {
-                curYlo = keel::min(curYlo, ds.y[k] + ds.v[k]); curYhi = keel::max(curYhi, ds.y[k] + ds.v[k]);
+                const keel::f64 ty = ds.y[k] + ds.v[k] * qScale;
+                if (keel::is_finite(ty)) { curYlo = keel::min(curYlo, ty); curYhi = keel::max(curYhi, ty); }
             }
         }
         if (ds.kind == RenderChartKind::ErrorBar) {
@@ -703,14 +753,19 @@ void addLine(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
              keel::ArrayRef<keel::f64> ys, RenderRgb c, keel::f64 w,
              RenderLineStyle ls)
 {
-    if (xs.size() < 2 || ys.size() < 2 || ls == RenderLineStyle::None)
+    const keel::usize n = keel::min(xs.size(), ys.size());
+    if (n < 2 || ls == RenderLineStyle::None)
         return;
+    for (keel::usize i = 0; i < n; ++i) {
+        if (!keel::is_finite(xs[i]) || !keel::is_finite(ys[i]))
+            return;
+    }
     Cmd cmd;
     cmd.kind = Cmd::Kind::Line;
-    cmd.xs.reserve(xs.size());
-    for (keel::f64 v : xs) cmd.xs.push_back(v);
-    cmd.ys.reserve(ys.size());
-    for (keel::f64 v : ys) cmd.ys.push_back(v);
+    cmd.xs.reserve(n);
+    for (keel::usize i = 0; i < n; ++i) cmd.xs.push_back(xs[i]);
+    cmd.ys.reserve(n);
+    for (keel::usize i = 0; i < n; ++i) cmd.ys.push_back(ys[i]);
     cmd.color = c;
     cmd.width = w;
     cmd.lineStyle = ls;
@@ -769,13 +824,18 @@ void addClippedSeg(keel::Array<Cmd> &out, keel::f64 x0, keel::f64 y0,
 void addPoly(keel::Array<Cmd> &out, keel::ArrayRef<keel::f64> xs,
              keel::ArrayRef<keel::f64> ys, RenderRgb c, bool fill)
 {
-    if (xs.size() < 2 || ys.size() < 2) return;
+    const keel::usize n = keel::min(xs.size(), ys.size());
+    if (n < 2) return;
+    for (keel::usize i = 0; i < n; ++i) {
+        if (!keel::is_finite(xs[i]) || !keel::is_finite(ys[i]))
+            return;
+    }
     Cmd cmd;
     cmd.kind = Cmd::Kind::Poly;
-    cmd.xs.reserve(xs.size());
-    for (keel::f64 v : xs) cmd.xs.push_back(v);
-    cmd.ys.reserve(ys.size());
-    for (keel::f64 v : ys) cmd.ys.push_back(v);
+    cmd.xs.reserve(n);
+    for (keel::usize i = 0; i < n; ++i) cmd.xs.push_back(xs[i]);
+    cmd.ys.reserve(n);
+    for (keel::usize i = 0; i < n; ++i) cmd.ys.push_back(ys[i]);
     cmd.color = c;
     cmd.fill = fill;
     cmd.width = 1.0;
@@ -793,6 +853,8 @@ void addMarker(keel::Array<Cmd> &out, keel::f64 x, keel::f64 y, keel::f64 size,
                RenderRgb edgeColor, keel::StringRef kind, bool hasFill,
                RenderRgb fillColor, bool noEdge, keel::f64 strokeW)
 {
+    if (!keel::is_finite(x) || !keel::is_finite(y) || !keel::is_finite(size))
+        return;
     Cmd cmd;
     cmd.kind = Cmd::Kind::Mark;
     cmd.x = x; cmd.y = y;

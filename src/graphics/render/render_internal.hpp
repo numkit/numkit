@@ -124,6 +124,98 @@ inline bool is3dDataset(const RenderDataset &ds) noexcept
         || (ds.kind == RenderChartKind::Plot3 && !ds.z.empty());
 }
 
+inline char canonicalMarkerGlyph(keel::StringRef k) noexcept
+{
+    if (k.empty()) return 'o';
+    if (k == "s" || k == "square")    return 's';
+    if (k == "d" || k == "diamond")   return 'd';
+    if (k == "p" || k == "pentagram") return 'p';
+    if (k == "h" || k == "hexagram")  return 'h';
+    const char c = k[0];
+    if (c == 'o' || c == '+' || c == 'x' || c == '*' || c == '.'
+        || c == '^' || c == 'v' || c == '>' || c == '<')
+        return c;
+    return 'o';
+}
+
+/// Generates screen-space polygon vertices (y-down) for polygonal markers
+/// ('s', 'd', '^', 'v', '>', '<', 'p', 'h'). Returns vertex count (0 if non-polygon).
+inline keel::i32 buildMarkerPolygon(char glyph, keel::f64 cx, keel::f64 cy, keel::f64 r,
+                                    keel::f64 outX[12], keel::f64 outY[12]) noexcept
+{
+    switch (glyph) {
+    case 's': {
+        const keel::f64 s = r * 0.92;
+        outX[0] = cx - s; outY[0] = cy - s;
+        outX[1] = cx + s; outY[1] = cy - s;
+        outX[2] = cx + s; outY[2] = cy + s;
+        outX[3] = cx - s; outY[3] = cy + s;
+        return 4;
+    }
+    case 'd': {
+        const keel::f64 rx = r * 0.85, ry = r * 1.15;
+        outX[0] = cx;      outY[0] = cy - ry;
+        outX[1] = cx + rx; outY[1] = cy;
+        outX[2] = cx;      outY[2] = cy + ry;
+        outX[3] = cx - rx; outY[3] = cy;
+        return 4;
+    }
+    case '^': {
+        const keel::f64 w = r * 1.05, top = r * 1.05, bot = r * 0.72;
+        outX[0] = cx;     outY[0] = cy - top;
+        outX[1] = cx + w; outY[1] = cy + bot;
+        outX[2] = cx - w; outY[2] = cy + bot;
+        return 3;
+    }
+    case 'v': {
+        const keel::f64 w = r * 1.05, top = r * 0.72, bot = r * 1.05;
+        outX[0] = cx - w; outY[0] = cy - top;
+        outX[1] = cx + w; outY[1] = cy - top;
+        outX[2] = cx;     outY[2] = cy + bot;
+        return 3;
+    }
+    case '>': {
+        const keel::f64 h = r * 1.05, tip = r * 1.05, back = r * 0.72;
+        outX[0] = cx - back; outY[0] = cy - h;
+        outX[1] = cx + tip;  outY[1] = cy;
+        outX[2] = cx - back; outY[2] = cy + h;
+        return 3;
+    }
+    case '<': {
+        const keel::f64 h = r * 1.05, tip = r * 1.05, back = r * 0.72;
+        outX[0] = cx + back; outY[0] = cy - h;
+        outX[1] = cx + back; outY[1] = cy + h;
+        outX[2] = cx - tip;  outY[2] = cy;
+        return 3;
+    }
+    case 'p': {
+        const keel::f64 rOut = r * 1.15, rIn = r * 0.48;
+        for (keel::i32 i = 0; i < 10; ++i) {
+            const keel::f64 ang = -keel::kPi * 0.5 + keel::as<keel::f64>(i) * (keel::kPi / 5.0);
+            const keel::f64 rad = (i % 2 == 0) ? rOut : rIn;
+            outX[i] = cx + rad * keel::cos(ang);
+            outY[i] = cy + rad * keel::sin(ang);
+        }
+        return 10;
+    }
+    case 'h': {
+        const keel::f64 rOut = r * 1.15, rIn = r * 0.62;
+        for (keel::i32 i = 0; i < 12; ++i) {
+            const keel::f64 ang = -keel::kPi * 0.5 + keel::as<keel::f64>(i) * (keel::kPi / 6.0);
+            const keel::f64 rad = (i % 2 == 0) ? rOut : rIn;
+            outX[i] = cx + rad * keel::cos(ang);
+            outY[i] = cy + rad * keel::sin(ang);
+        }
+        return 12;
+    }
+    default:
+        return 0;
+    }
+}
+
+/// Computes auto-scale multiplier for a Quiver dataset (1.0 if disabled).
+keel::f64 computeQuiverScale(const RenderDataset &ds);
+
 // ── Palette helpers (render_palette.cpp) ─────────────────────────────
 const keel::StaticArray<RenderRgb, 8> &seriesPalette() noexcept;
 RenderRgb sampleColormap(keel::f64 t, keel::StringRef cmapName,

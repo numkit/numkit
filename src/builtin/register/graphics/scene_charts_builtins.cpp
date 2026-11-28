@@ -1292,7 +1292,8 @@ void contourCore(keel::ArrayRef<Value> args, keel::usize nargout,
         if (!zd.isEmpty()) cn->props.put(keel::String::from("ZData", mr), zd);
         if (!explicitLevels.isEmpty()) cn->props.put(keel::String::from("LevelList", mr), explicitLevels);
         if (autoLevelStep > 0.0) cn->props.put(keel::String::from("LevelStep", mr), Value::scalar(autoLevelStep, mr));
-        if (filled) cn->props.put(keel::String::from("Fill", mr), Value::fromString("on", mr));
+        if (filled)
+            cn->props.put(keel::String::from("FaceColor", mr), Value::fromString("flat", mr));
         if (nargout >= 2 && !zd.isEmpty() && !explicitLevels.isEmpty()) {
             cn->props.put(keel::String::from("ContourMatrix", mr),
                           computeContourMatrix(xd, yd, zd, explicitLevels, mr));

@@ -74,10 +74,10 @@ void computeNiceLimitRange(keel::f64 dmin, keel::f64 dmax, keel::StringRef metho
     // Default 'tickaligned': snap outer bounds to clean nice tick step.
     const keel::f64 p10 = keel::pow(10.0, keel::floor(keel::log10(span)));
     const keel::f64 s = span / p10;
-    const keel::f64 step = (s <= 1.5) ? 0.2 * p10
-                         : (s <= 3.0) ? 0.5 * p10
-                         : (s <= 7.0 || s >= 9.5) ? 1.0 * p10
-                                                  : 2.0 * p10;
+    const keel::f64 step = (s <= 1.0 + 1e-9) ? 0.1 * p10
+                         : (s <= 2.0 + 1e-9) ? 0.2 * p10
+                         : (s <= 5.0 + 1e-9) ? 0.5 * p10
+                                             : 1.0 * p10;
     loOut = keel::floor(dmin / step + 1e-12) * step;
     hiOut = keel::ceil(dmax / step - 1e-12) * step;
     if (hiOut <= loOut) {
@@ -272,8 +272,19 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         return;
     }
 
+    // Check if any visible child is a Bar chart (needs cross-series group/stack bounds).
+    bool hasAnyBar = false;
+    for (NodeId cid : ax->children) {
+        const GraphicsNode *ch = findNode(cid);
+        if (ch && ch->classId == ClassId::Bar
+            && !asciiEqualNoCase(getProperty(cid, "Visible", res).toString(), "off")) {
+            hasAnyBar = true;
+            break;
+        }
+    }
+
     // Cartesian Axes (incremental scan when new children are appended under hold-on)
-    const bool incremental = ax->boundsValid && ax->children.size() >= ax->boundsScannedCount;
+    const bool incremental = !hasAnyBar && ax->boundsValid && ax->children.size() >= ax->boundsScannedCount;
     keel::f64 xmin = incremental ? ax->boundsXMin : 0.0;
     keel::f64 xmax = incremental ? ax->boundsXMax : 0.0;
     bool anyX = incremental ? ax->boundsAnyX : false;
@@ -290,6 +301,10 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
     keel::f64 baseVal = incremental ? ax->boundsBaseVal : 0.0;
     bool hasImage = incremental ? ax->boundsHasImage : false;
     bool hasNonImage = incremental ? ax->boundsHasNonImage : false;
+    bool hasNonBarChart = false;
+    bool barCatAxisX = false;
+    bool barCatAxisY = false;
+    keel::Array<NodeId> barNodes(res);
     const Value viewV = getProperty(axId, "View", res);
     const bool isView3D = (viewV.isNumeric() && viewV.numel() >= 2 && keel::abs(viewV.elemAsDouble(1) - 90.0) > 1e-6);
 
@@ -301,6 +316,13 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
             continue;
         if (asciiEqualNoCase(getProperty(cid, "Visible", res).toString(), "off"))
             continue;
+
+        if (ch->classId == ClassId::Bar) {
+            hasNonImage = true;
+            barNodes.push_back(cid);
+            continue;
+        }
+        hasNonBarChart = true;
 
         if (ch->classId == ClassId::Group) {
             for (NodeId gcid : ch->children) {
@@ -420,7 +442,70 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
                 scanNumericBounds(*cd, cmin, cmax, anyC);
             }
         }
-        if (ch->classId == ClassId::Bar || ch->classId == ClassId::Area || ch->classId == ClassId::Stem) {
+        if (ch->classId == ClassId::Quiver) {
+            const Value *xd = ch->props.get("XData");
+            const Value *yd = ch->props.get("YData");
+            const Value *ud = ch->props.get("UData");
+            const Value *vd = ch->props.get("VData");
+            if (xd && yd && ud && vd) {
+                const keel::usize nq = keel::min(keel::min(xd->numel(), yd->numel()),
+                                                 keel::min(ud->numel(), vd->numel()));
+                const bool autoScale = !asciiEqualNoCase(getProperty(cid, "AutoScale", res).toString(), "off");
+                keel::f64 scaleFactor = 0.9;
+                const keel::f64 af = getProperty(cid, "AutoScaleFactor", res).toScalar();
+                if (keel::is_finite(af) && af > 0.0)
+                    scaleFactor = af;
+                keel::f64 qScale = 1.0;
+                if (autoScale && nq > 0) {
+                    keel::Array<keel::f64> ux(res), uy(res);
+                    ux.reserve(nq); uy.reserve(nq);
+                    for (keel::usize k = 0; k < nq; ++k) {
+                        const keel::f64 xv = xd->elemAsDouble(k);
+                        const keel::f64 yv = yd->elemAsDouble(k);
+                        if (keel::is_finite(xv)) ux.push_back(xv);
+                        if (keel::is_finite(yv)) uy.push_back(yv);
+                    }
+                    auto gridSpacing = [](keel::Array<keel::f64> &vals) -> keel::f64 {
+                        if (vals.size() < 2) return 1.0;
+                        keel::sort(vals.begin(), vals.end());
+                        const keel::f64 span = vals.back() - vals.front();
+                        if (!(span > 0.0)) return 1.0;
+                        keel::f64 minStep = span;
+                        const keel::f64 eps = span * 1e-9;
+                        for (keel::usize i = 1; i < vals.size(); ++i) {
+                            const keel::f64 d = vals[i] - vals[i - 1];
+                            if (d > eps && d < minStep) minStep = d;
+                        }
+                        return minStep > 0.0 ? minStep : 1.0;
+                    };
+                    const keel::f64 delx = gridSpacing(ux);
+                    const keel::f64 dely = gridSpacing(uy);
+                    keel::f64 maxNorm = 0.0;
+                    for (keel::usize k = 0; k < nq; ++k) {
+                        const keel::f64 u = ud->elemAsDouble(k);
+                        const keel::f64 v = vd->elemAsDouble(k);
+                        if (!keel::is_finite(u) || !keel::is_finite(v)) continue;
+                        const keel::f64 nrm = keel::max(keel::abs(u) / delx, keel::abs(v) / dely);
+                        if (nrm > maxNorm) maxNorm = nrm;
+                    }
+                    if (maxNorm > 1e-12)
+                        qScale = scaleFactor / maxNorm;
+                }
+                for (keel::usize k = 0; k < nq; ++k) {
+                    const keel::f64 tx = xd->elemAsDouble(k) + ud->elemAsDouble(k) * qScale;
+                    const keel::f64 ty = yd->elemAsDouble(k) + vd->elemAsDouble(k) * qScale;
+                    if (keel::is_finite(tx)) {
+                        if (!anyX) { xmin = xmax = tx; anyX = true; }
+                        else { xmin = keel::min(xmin, tx); xmax = keel::max(xmax, tx); }
+                    }
+                    if (keel::is_finite(ty)) {
+                        if (!anyY) { ymin = ymax = ty; anyY = true; }
+                        else { ymin = keel::min(ymin, ty); ymax = keel::max(ymax, ty); }
+                    }
+                }
+            }
+        }
+        if (ch->classId == ClassId::Area || ch->classId == ClassId::Stem) {
             hasBaseZero = true;
             baseVal = getProperty(cid, "BaseValue", res).toScalar();
         }
@@ -482,6 +567,114 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         }
     }
 
+    // Process Bar series (supports grouped, stacked, and horizontal barh).
+    if (!barNodes.empty()) {
+        const keel::usize M = barNodes.size();
+        const bool isHoriz = asciiEqualNoCase(getProperty(barNodes[0], "Horizontal", res).toString(), "on");
+        const bool isStacked = asciiEqualNoCase(getProperty(barNodes[0], "BarLayout", res).toString(), "stacked");
+        keel::f64 bw = getProperty(barNodes[0], "BarWidth", res).toScalar();
+        if (!keel::is_finite(bw) || !(bw > 0.0)) bw = 0.8;
+        keel::f64 bv = getProperty(barNodes[0], "BaseValue", res).toScalar();
+        if (!keel::is_finite(bv)) bv = 0.0;
+
+        keel::f64 catMin = 0.0, catMax = 0.0;
+        bool anyCat = false;
+        keel::f64 dx = 1.0;
+        keel::f64 minStep = 1e300;
+        keel::usize maxN = 0;
+
+        for (keel::usize bi = 0; bi < M; ++bi) {
+            const GraphicsNode *bn = findNode(barNodes[bi]);
+            if (!bn) continue;
+            const Value *xd = bn->props.get("XData");
+            const Value *yd = bn->props.get("YData");
+            if (xd && !xd->isEmpty()) {
+                scanNumericBounds(*xd, catMin, catMax, anyCat);
+                if (xd->numel() > maxN) maxN = xd->numel();
+                for (keel::usize j = 1; j < xd->numel(); ++j) {
+                    const keel::f64 d = keel::abs(xd->elemAsDouble(j) - xd->elemAsDouble(j - 1));
+                    if (d > 1e-12 && d < minStep) minStep = d;
+                }
+            }
+            if (yd && yd->numel() > maxN) maxN = yd->numel();
+        }
+        if (minStep < 1e299) dx = minStep;
+
+        keel::f64 valMin = bv, valMax = bv;
+        bool anyVal = false;
+        if (isStacked && M > 1) {
+            keel::Array<keel::f64> posSum(res), negSum(res);
+            posSum.resize(maxN, bv);
+            negSum.resize(maxN, bv);
+            for (keel::usize bi = 0; bi < M; ++bi) {
+                const GraphicsNode *bn = findNode(barNodes[bi]);
+                if (!bn) continue;
+                const Value *yd = bn->props.get("YData");
+                if (!yd) continue;
+                for (keel::usize j = 0; j < yd->numel() && j < maxN; ++j) {
+                    const keel::f64 yv = yd->elemAsDouble(j);
+                    if (!keel::is_finite(yv)) continue;
+                    anyVal = true;
+                    if (yv >= 0.0) {
+                        posSum[j] += yv;
+                        valMax = keel::max(valMax, posSum[j]);
+                    } else {
+                        negSum[j] += yv;
+                        valMin = keel::min(valMin, negSum[j]);
+                    }
+                }
+            }
+        } else {
+            for (keel::usize bi = 0; bi < M; ++bi) {
+                const GraphicsNode *bn = findNode(barNodes[bi]);
+                if (!bn) continue;
+                if (const Value *yd = bn->props.get("YData")) {
+                    for (keel::usize j = 0; j < yd->numel(); ++j) {
+                        const keel::f64 yv = yd->elemAsDouble(j);
+                        if (keel::is_finite(yv)) {
+                            anyVal = true;
+                            valMin = keel::min(valMin, yv);
+                            valMax = keel::max(valMax, yv);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (anyCat) {
+            keel::f64 pad = 0.5 * dx;
+            if (!isStacked && M > 1) {
+                const keel::f64 groupW = keel::min(0.8, keel::as<keel::f64>(M) / (keel::as<keel::f64>(M) + 1.5));
+                const keel::f64 slotW = groupW / keel::as<keel::f64>(M);
+                const keel::f64 singleW = bw * slotW;
+                pad = (0.5 * groupW - 0.5 * slotW + 1.5 * singleW) * dx;
+            } else {
+                const keel::f64 singleW = bw * dx;
+                pad = 1.5 * singleW;
+            }
+            const keel::f64 cLo = catMin - pad;
+            const keel::f64 cHi = catMax + pad;
+            if (isHoriz) {
+                barCatAxisY = !hasNonBarChart;
+                if (!anyY) { ymin = cLo; ymax = cHi; anyY = true; }
+                else { ymin = keel::min(ymin, cLo); ymax = keel::max(ymax, cHi); }
+            } else {
+                barCatAxisX = !hasNonBarChart;
+                if (!anyX) { xmin = cLo; xmax = cHi; anyX = true; }
+                else { xmin = keel::min(xmin, cLo); xmax = keel::max(xmax, cHi); }
+            }
+        }
+        if (anyVal) {
+            if (isHoriz) {
+                if (!anyX) { xmin = valMin; xmax = valMax; anyX = true; }
+                else { xmin = keel::min(xmin, valMin); xmax = keel::max(xmax, valMax); }
+            } else {
+                if (!anyY) { ymin = valMin; ymax = valMax; anyY = true; }
+                else { ymin = keel::min(ymin, valMin); ymax = keel::max(ymax, valMax); }
+            }
+        }
+    }
+
     ax->boundsValid = true;
     ax->boundsScannedCount = ax->children.size();
     ax->boundsAnyX = anyX; ax->boundsXMin = xmin; ax->boundsXMax = xmax;
@@ -527,8 +720,8 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
     };
 
     const bool imageOnlyTight = (hasImage && !hasNonImage);
-    applyAxis('x', "XLim", "XLimMode", imageOnlyTight ? nullptr : "XLimitMethod", "XScale", xmin, xmax, anyX);
-    applyAxis('y', "YLim", "YLimMode", imageOnlyTight ? nullptr : "YLimitMethod", "YScale", ymin, ymax, anyY);
+    applyAxis('x', "XLim", "XLimMode", (imageOnlyTight || barCatAxisX) ? nullptr : "XLimitMethod", "XScale", xmin, xmax, anyX);
+    applyAxis('y', "YLim", "YLimMode", (imageOnlyTight || barCatAxisY) ? nullptr : "YLimitMethod", "YScale", ymin, ymax, anyY);
     if (anyZ) {
         applyAxis('z', "ZLim", "ZLimMode", "ZLimitMethod", "ZScale", zmin, zmax, true);
     } else if ((anyX || anyY) && asciiEqualNoCase(getProperty(axId, "ZLimMode", res).toString(), "auto")) {
@@ -560,6 +753,7 @@ void GraphicsScene::recomputeBarEndPoints(NodeId axId, keel::Allocator *mr)
     const keel::f64 groupWidth = (M == 1) ? 0.0
                                           : keel::min(0.8, keel::as<keel::f64>(M) / (keel::as<keel::f64>(M) + 1.5));
 
+    keel::Array<keel::f64> posStack(res), negStack(res);
     for (keel::usize k = 0; k < M; ++k) {
         GraphicsNode *bn = findNode(bars[k]);
         if (!bn) continue;
@@ -568,8 +762,11 @@ void GraphicsScene::recomputeBarEndPoints(NodeId axId, keel::Allocator *mr)
         if (!xd || !yd || xd->isEmpty()) continue;
 
         const keel::usize n = xd->numel();
+        if (posStack.size() < n) posStack.resize(n, 0.0);
+        if (negStack.size() < n) negStack.resize(n, 0.0);
         const keel::String layout = getProperty(bars[k], "BarLayout", res).toString();
         const bool isGrouped = (M > 1) && asciiEqualNoCase(layout, "grouped");
+        const bool isStacked = (M > 1) && asciiEqualNoCase(layout, "stacked");
 
         // Compute typical x spacing for grouped offset.
         keel::f64 dx = 1.0;
@@ -589,7 +786,18 @@ void GraphicsScene::recomputeBarEndPoints(NodeId axId, keel::Allocator *mr)
         Value yep = Value::matrix(1, n, ValueType::DOUBLE, res);
         for (keel::usize j = 0; j < n; ++j) {
             xep.doubleDataMut()[j] = xd->elemAsDouble(j) + offset;
-            yep.doubleDataMut()[j] = (j < yd->numel()) ? yd->elemAsDouble(j) : 0.0;
+            const keel::f64 yv = (j < yd->numel()) ? yd->elemAsDouble(j) : 0.0;
+            if (isStacked && keel::is_finite(yv)) {
+                if (yv >= 0.0) {
+                    posStack[j] += yv;
+                    yep.doubleDataMut()[j] = posStack[j];
+                } else {
+                    negStack[j] += yv;
+                    yep.doubleDataMut()[j] = negStack[j];
+                }
+            } else {
+                yep.doubleDataMut()[j] = yv;
+            }
         }
         bn->props.put(keel::String::from("XEndPoints", mr_), keel::move(xep));
         bn->props.put(keel::String::from("YEndPoints", mr_), keel::move(yep));

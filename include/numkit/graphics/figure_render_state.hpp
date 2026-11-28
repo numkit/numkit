@@ -80,6 +80,8 @@ struct RenderDataset {
     keel::Array<keel::f64> eNeg;    // ErrorBar YNegativeDelta
     keel::Array<keel::f64> ePos;    // ErrorBar YPositiveDelta
     keel::Array<keel::f64> sizes;   // Scatter SizeData
+    keel::Array<keel::f64> cdata;   // Scatter per-point scalar or N*3 RGB CData
+    keel::usize cdataCols = 1;      // 1 = scalar colormap values, 3 = direct RGB [0..1]
     keel::Array<keel::f64> levels;  // Contour LevelList
 
     // Typed line & marker style
@@ -93,17 +95,27 @@ struct RenderDataset {
     RenderRgb markerFaceColor{0, 0, 0};
     bool hasMarkerFaceColor = false;
     bool markerFaceAuto = false;
+    bool markerFaceFlat = false;
     RenderRgb markerEdgeColor{0, 0, 0};
     bool hasMarkerEdgeColor = false;
+    bool markerEdgeFlat = false;
     bool markerEdgeNone = false;
 
-    // Histogram / Patch / Area face & edge styling
+    // Bar / Histogram / Patch / Area / Contour / Quiver styling
     RenderRgb faceColor{0x00, 0x72, 0xbd};
     bool hasFaceColor = false;
     RenderRgb edgeColor{0xd9, 0xd9, 0xd9};
     bool hasEdgeColor = false;
+    bool edgeNone = false;
     keel::f64 faceAlpha = 1.0;
     keel::f64 binWidth = 0.0;
+    keel::f64 barWidth = 0.8;
+    keel::f64 baseValue = 0.0;
+    bool barStacked = false;
+    bool barHorizontal = false;
+    bool contourFilled = false;
+    bool quiverAutoScale = true;
+    keel::f64 quiverAutoScaleFactor = 0.9;
 
     // Text annotation properties (kind == RenderChartKind::Text)
     keel::f64 fontSize = 10.0;

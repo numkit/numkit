@@ -186,69 +186,73 @@ public:
                 keel::StringRef k, bool hasFill, RenderRgb fillColor, bool noEdge,
                 keel::f64 strokeW)
     {
+        if (!keel::is_finite(x) || !keel::is_finite(y))
+            return;
         const keel::f64 r = keel::max(2.0, size * 0.5);
         const keel::f64 sw = keel::max(1.0, strokeW);
-        if (k == "s") {
-            const keel::i32 x0 = keel::as<keel::i32>(keel::round_i64(x - r));
-            const keel::i32 x1 = keel::as<keel::i32>(keel::round_i64(x + r));
-            const keel::i32 y0 = keel::as<keel::i32>(keel::round_i64(y - r));
-            const keel::i32 y1 = keel::as<keel::i32>(keel::round_i64(y + r));
-            if (hasFill) {
-                for (keel::i32 py = y0; py <= y1; ++py)
-                    for (keel::i32 pxI = x0; pxI <= x1; ++pxI)
-                        px(pxI, py, fillColor);
-            }
+        const char glyph = detail::canonicalMarkerGlyph(k);
+
+        keel::f64 vx[12], vy[12];
+        const keel::i32 nv = detail::buildMarkerPolygon(glyph, x, y, r, vx, vy);
+        if (nv > 0) {
+            const keel::usize n = keel::as<keel::usize>(nv);
+            if (hasFill)
+                polygon(keel::ArrayRef<keel::f64>(vx, n), keel::ArrayRef<keel::f64>(vy, n), fillColor, true);
             if (!noEdge) {
                 keel::f64 ph = 0.0;
-                lineSegment(x - r, y - r, x + r, y - r, edgeColor, sw, RenderLineStyle::Solid, ph);
-                lineSegment(x + r, y - r, x + r, y + r, edgeColor, sw, RenderLineStyle::Solid, ph);
-                lineSegment(x + r, y + r, x - r, y + r, edgeColor, sw, RenderLineStyle::Solid, ph);
-                lineSegment(x - r, y + r, x - r, y - r, edgeColor, sw, RenderLineStyle::Solid, ph);
-            }
-        } else if (k == "+" || k == "x") {
-            keel::f64 ph = 0.0;
-            if (k == "+") {
-                lineSegment(x - r, y, x + r, y, edgeColor, sw, RenderLineStyle::Solid, ph);
-                lineSegment(x, y - r, x, y + r, edgeColor, sw, RenderLineStyle::Solid, ph);
-            } else {
-                lineSegment(x - r, y - r, x + r, y + r, edgeColor, sw, RenderLineStyle::Solid, ph);
-                lineSegment(x + r, y - r, x - r, y + r, edgeColor, sw, RenderLineStyle::Solid, ph);
-            }
-        } else {
-            const keel::f64 halfStroke = sw * 0.5;
-            const keel::f64 outer = r + halfStroke + 1.5;
-            const keel::i32 minX = keel::max(0, keel::as<keel::i32>(keel::floor(x - outer)));
-            const keel::i32 maxX = keel::min(w_ - 1, keel::as<keel::i32>(keel::ceil(x + outer)));
-            const keel::i32 minY = keel::max(0, keel::as<keel::i32>(keel::floor(y - outer)));
-            const keel::i32 maxY = keel::min(h_ - 1, keel::as<keel::i32>(keel::ceil(y + outer)));
-            for (keel::i32 py = minY; py <= maxY; ++py) {
-                const keel::f64 cy = keel::as<keel::f64>(py) + 0.5;
-                for (keel::i32 pxI = minX; pxI <= maxX; ++pxI) {
-                    const keel::f64 cx = keel::as<keel::f64>(pxI) + 0.5;
-                    const keel::f64 d = keel::hypot(cx - x, cy - y);
-                    if (hasFill) {
-                        const keel::f64 fcov = r + 0.5 - d;
-                        if (fcov > 0.0) {
-                            const keel::f64 a = fcov >= 1.0 ? 1.0 : fcov;
-                            blendPx(pxI, py, fillColor, keel::as<keel::u8>(keel::round_i64(a * 255.0)));
-                        }
-                    }
-                    if (!noEdge) {
-                        const keel::f64 ecov = halfStroke + 0.5 - keel::abs(d - r);
-                        if (ecov > 0.0) {
-                            const keel::f64 a = ecov >= 1.0 ? 1.0 : ecov;
-                            blendPx(pxI, py, edgeColor, keel::as<keel::u8>(keel::round_i64(a * 255.0)));
-                        }
-                    }
+                for (keel::usize i = 0; i < n; ++i) {
+                    const keel::usize j = (i + 1) % n;
+                    lineSegment(vx[i], vy[i], vx[j], vy[j], edgeColor, sw, RenderLineStyle::Solid, ph);
                 }
             }
-            if (k == "*") {
-                keel::f64 ph = 0.0;
+            return;
+        }
+
+        if (glyph == '+' || glyph == 'x' || glyph == '*') {
+            keel::f64 ph = 0.0;
+            if (glyph == '+' || glyph == '*') {
                 lineSegment(x - r, y, x + r, y, edgeColor, sw, RenderLineStyle::Solid, ph);
                 lineSegment(x, y - r, x, y + r, edgeColor, sw, RenderLineStyle::Solid, ph);
-                const keel::f64 d2 = r * 0.707;
+            }
+            if (glyph == 'x' || glyph == '*') {
+                const keel::f64 d2 = r * 0.70710678;
                 lineSegment(x - d2, y - d2, x + d2, y + d2, edgeColor, sw, RenderLineStyle::Solid, ph);
                 lineSegment(x + d2, y - d2, x - d2, y + d2, edgeColor, sw, RenderLineStyle::Solid, ph);
+            }
+            return;
+        }
+
+        // Circle ('o') or small solid dot ('.')
+        const bool isDot = (glyph == '.');
+        const keel::f64 cr = isDot ? keel::max(1.5, r * 0.45) : r;
+        const bool doFill = isDot || hasFill;
+        const RenderRgb fCol = isDot ? edgeColor : fillColor;
+        const bool doEdge = !isDot && !noEdge;
+        const keel::f64 halfStroke = sw * 0.5;
+        const keel::f64 outer = cr + halfStroke + 1.5;
+        const keel::i32 minX = keel::max(0, keel::as<keel::i32>(keel::floor(x - outer)));
+        const keel::i32 maxX = keel::min(w_ - 1, keel::as<keel::i32>(keel::ceil(x + outer)));
+        const keel::i32 minY = keel::max(0, keel::as<keel::i32>(keel::floor(y - outer)));
+        const keel::i32 maxY = keel::min(h_ - 1, keel::as<keel::i32>(keel::ceil(y + outer)));
+        for (keel::i32 py = minY; py <= maxY; ++py) {
+            const keel::f64 cy = keel::as<keel::f64>(py) + 0.5;
+            for (keel::i32 pxI = minX; pxI <= maxX; ++pxI) {
+                const keel::f64 cx = keel::as<keel::f64>(pxI) + 0.5;
+                const keel::f64 d = keel::hypot(cx - x, cy - y);
+                if (doFill) {
+                    const keel::f64 fcov = cr + 0.5 - d;
+                    if (fcov > 0.0) {
+                        const keel::f64 a = fcov >= 1.0 ? 1.0 : fcov;
+                        blendPx(pxI, py, fCol, keel::as<keel::u8>(keel::round_i64(a * 255.0)));
+                    }
+                }
+                if (doEdge) {
+                    const keel::f64 ecov = halfStroke + 0.5 - keel::abs(d - cr);
+                    if (ecov > 0.0) {
+                        const keel::f64 a = ecov >= 1.0 ? 1.0 : ecov;
+                        blendPx(pxI, py, edgeColor, keel::as<keel::u8>(keel::round_i64(a * 255.0)));
+                    }
+                }
             }
         }
     }
