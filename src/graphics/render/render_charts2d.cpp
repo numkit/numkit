@@ -414,6 +414,17 @@ void render2dSeries(const RenderAxes &ax, const PlotTransform &tf,
     bool barStackInit = false;
     keel::usize barIdx = 0;
 
+    keel::usize maxAreaN = 0;
+    for (const auto &ds : ax.datasets) {
+        if (!ds.visible || ds.kind != RenderChartKind::Area)
+            continue;
+        const keel::usize an = ds.x.empty() ? ds.y.size() : keel::min(ds.x.size(), ds.y.size());
+        if (an > maxAreaN) maxAreaN = an;
+    }
+    keel::Array<keel::f64> areaPosStack;
+    keel::Array<keel::f64> areaNegStack;
+    bool areaStackInit = false;
+
     keel::usize seriesIdx = 0;
     for (const auto &ds : ax.datasets) {
         if (!ds.visible || is3dDataset(ds)
@@ -577,13 +588,20 @@ void render2dSeries(const RenderAxes &ax, const PlotTransform &tf,
             if (!(bw > 0.0) && n > 1)
                 bw = keel::abs(xAt(1) - xAt(0));
             const keel::f64 yBase = tf.Ys(keel::min(keel::max(0.0, YRs.lo), YRs.hi), rightY);
+            const RenderRgb edge = ds.hasEdgeColor ? ds.edgeColor : RenderRgb(0x21, 0x21, 0x21);
+            const keel::f64 edgeW = keel::max(0.75, 0.65 * uiScale);
             for (keel::usize k = 0; k < n; ++k) {
+                if (!keel::is_finite(ds.y[k]) || ds.y[k] == 0.0)
+                    continue;
                 const keel::f64 x0p = keel::max(tf.plot.x0, tf.X(xAt(k) - bw * 0.5));
                 const keel::f64 x1p = keel::min(tf.plot.x1, tf.X(xAt(k) + bw * 0.5));
                 const keel::f64 yTop = keel::max(tf.plot.y0, keel::min(tf.plot.y1, tf.Ys(ds.y[k], rightY)));
-                if (x1p > x0p) {
-                    addPoly(out, {x0p, x1p, x1p, x0p}, {yBase, yBase, yTop, yTop}, face, true);
-                    addLine(out, {x0p, x1p}, {yTop, yTop}, ds.edgeColor, keel::max(0.75, 0.75 * uiScale));
+                const keel::f64 py0 = keel::min(yBase, yTop);
+                const keel::f64 py1 = keel::max(yBase, yTop);
+                if (x1p > x0p && py1 > py0) {
+                    addPoly(out, {x0p, x1p, x1p, x0p}, {py0, py0, py1, py1}, face, true);
+                    if (!ds.edgeNone)
+                        addLine(out, {x0p, x1p, x1p, x0p, x0p}, {py0, py0, py1, py1, py0}, edge, edgeW);
                 }
             }
             break;
@@ -681,10 +699,20 @@ void render2dSeries(const RenderAxes &ax, const PlotTransform &tf,
             break;
         }
         case RenderChartKind::Polygon: {
+            const RenderRgb face = ds.hasFaceColor ? ds.faceColor : col;
+            const RenderRgb edge = ds.hasEdgeColor ? ds.edgeColor : RenderRgb(0x21, 0x21, 0x21);
+            const keel::f64 edgeW = keel::max(0.75, 0.65 * uiScale);
             keel::Array<keel::f64> px, py;
             auto flushRing = [&]() {
-                if (px.size() >= 3)
-                    addPoly(out, px, py, col, true);
+                if (px.size() >= 3) {
+                    addPoly(out, px, py, face, true);
+                    if (!ds.edgeNone && ds.lineStyle != RenderLineStyle::None) {
+                        keel::Array<keel::f64> ex = px.clone(), ey = py.clone();
+                        ex.push_back(px[0]);
+                        ey.push_back(py[0]);
+                        addClippedLine(out, ex, ey, tf.plot, edge, edgeW, ds.lineStyle);
+                    }
+                }
                 px.clear();
                 py.clear();
             };
@@ -700,27 +728,61 @@ void render2dSeries(const RenderAxes &ax, const PlotTransform &tf,
             break;
         }
         case RenderChartKind::Area: {
-            keel::Array<keel::f64> px, py;
-            const keel::f64 yBase = tf.Ys(keel::min(keel::max(0.0, YRs.lo), YRs.hi), rightY);
-            keel::f64 firstX = 0.0, lastX = 0.0;
-            bool anyPt = false;
-            for (keel::usize k = 0; k < n; ++k) {
-                if (!validPoint(tf, rightY, xAt(k), ds.y[k])) continue;
-                const keel::f64 sx = tf.X(xAt(k)), sy = tf.Ys(ds.y[k], rightY);
-                if (!anyPt) {
-                    firstX = sx;
-                    px.push_back(firstX);
-                    py.push_back(yBase);
-                    anyPt = true;
-                }
-                lastX = sx;
-                px.push_back(sx);
-                py.push_back(sy);
+            if (!areaStackInit) {
+                areaPosStack.resize(maxAreaN, ds.baseValue);
+                areaNegStack.resize(maxAreaN, ds.baseValue);
+                areaStackInit = true;
             }
-            if (anyPt) {
-                px.push_back(lastX);
-                py.push_back(yBase);
-                addPoly(out, px, py, col, true);
+            const RenderRgb face = ds.hasFaceColor ? ds.faceColor : col;
+            const RenderRgb edge = ds.hasEdgeColor ? ds.edgeColor : RenderRgb(0x21, 0x21, 0x21);
+            const keel::f64 edgeW = keel::max(0.75, 0.65 * uiScale);
+
+            keel::Array<keel::f64> topX, topY, botX, botY;
+            topX.reserve(n); topY.reserve(n);
+            botX.reserve(n); botY.reserve(n);
+            for (keel::usize k = 0; k < n; ++k) {
+                const keel::f64 xv = xAt(k), yv = ds.y[k];
+                if (!keel::is_finite(xv) || !keel::is_finite(yv))
+                    continue;
+                keel::f64 bVal = ds.baseValue;
+                keel::f64 tVal = yv;
+                if (k < areaPosStack.size()) {
+                    if (yv >= 0.0) {
+                        bVal = areaPosStack[k];
+                        tVal = bVal + yv;
+                        areaPosStack[k] = tVal;
+                    } else {
+                        bVal = areaNegStack[k];
+                        tVal = bVal + yv;
+                        areaNegStack[k] = tVal;
+                    }
+                }
+                if (!validPoint(tf, rightY, xv, bVal) || !validPoint(tf, rightY, xv, tVal))
+                    continue;
+                const keel::f64 sx = keel::clamp(tf.X(xv), tf.plot.x0, tf.plot.x1);
+                const keel::f64 syTop = keel::clamp(tf.Ys(tVal, rightY), tf.plot.y0, tf.plot.y1);
+                const keel::f64 syBot = keel::clamp(tf.Ys(bVal, rightY), tf.plot.y0, tf.plot.y1);
+                topX.push_back(sx); topY.push_back(syTop);
+                botX.push_back(sx); botY.push_back(syBot);
+            }
+            if (topX.size() >= 2) {
+                keel::Array<keel::f64> px, py;
+                px.reserve(topX.size() * 2 + 1);
+                py.reserve(topY.size() * 2 + 1);
+                for (keel::usize k = 0; k < topX.size(); ++k) {
+                    px.push_back(topX[k]);
+                    py.push_back(topY[k]);
+                }
+                for (keel::usize k = botX.size(); k-- > 0;) {
+                    px.push_back(botX[k]);
+                    py.push_back(botY[k]);
+                }
+                addPoly(out, px, py, face, true);
+                if (!ds.edgeNone && ds.lineStyle != RenderLineStyle::None) {
+                    px.push_back(px[0]);
+                    py.push_back(py[0]);
+                    addLine(out, px, py, edge, edgeW, ds.lineStyle);
+                }
             }
             break;
         }

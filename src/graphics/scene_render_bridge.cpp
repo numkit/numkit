@@ -534,6 +534,11 @@ void projectOneAxes(const GraphicsScene &scene, NodeId axId, RenderAxes &dst, ke
             ds.kind = RenderChartKind::Area;
             ds.x = extractVec1D(scene.getProperty(cid, "XData", mr));
             ds.y = extractVec1D(scene.getProperty(cid, "YData", mr));
+            if (scene.hasProperty(cid, "BaseValue")) {
+                const keel::f64 bv = scene.getProperty(cid, "BaseValue", mr).toScalar();
+                if (keel::is_finite(bv))
+                    ds.baseValue = bv;
+            }
             break;
         }
         case ClassId::Image: {

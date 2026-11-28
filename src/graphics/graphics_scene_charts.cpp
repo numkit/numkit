@@ -272,19 +272,19 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         return;
     }
 
-    // Check if any visible child is a Bar chart (needs cross-series group/stack bounds).
-    bool hasAnyBar = false;
+    // Check if any visible child is a Bar or Area chart (needs cross-series group/stack bounds).
+    bool hasAnyBarOrArea = false;
     for (NodeId cid : ax->children) {
         const GraphicsNode *ch = findNode(cid);
-        if (ch && ch->classId == ClassId::Bar
+        if (ch && (ch->classId == ClassId::Bar || ch->classId == ClassId::Area)
             && !asciiEqualNoCase(getProperty(cid, "Visible", res).toString(), "off")) {
-            hasAnyBar = true;
+            hasAnyBarOrArea = true;
             break;
         }
     }
 
     // Cartesian Axes (incremental scan when new children are appended under hold-on)
-    const bool incremental = !hasAnyBar && ax->boundsValid && ax->children.size() >= ax->boundsScannedCount;
+    const bool incremental = !hasAnyBarOrArea && ax->boundsValid && ax->children.size() >= ax->boundsScannedCount;
     keel::f64 xmin = incremental ? ax->boundsXMin : 0.0;
     keel::f64 xmax = incremental ? ax->boundsXMax : 0.0;
     bool anyX = incremental ? ax->boundsAnyX : false;
@@ -302,9 +302,12 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
     bool hasImage = incremental ? ax->boundsHasImage : false;
     bool hasNonImage = incremental ? ax->boundsHasNonImage : false;
     bool hasNonBarChart = false;
+    bool hasHistogram = false;
+    bool hasNonHistChart = false;
     bool barCatAxisX = false;
     bool barCatAxisY = false;
     keel::Array<NodeId> barNodes(res);
+    keel::Array<NodeId> areaNodes(res);
     const Value viewV = getProperty(axId, "View", res);
     const bool isView3D = (viewV.isNumeric() && viewV.numel() >= 2 && keel::abs(viewV.elemAsDouble(1) - 90.0) > 1e-6);
 
@@ -319,10 +322,20 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
 
         if (ch->classId == ClassId::Bar) {
             hasNonImage = true;
+            hasNonHistChart = true;
             barNodes.push_back(cid);
             continue;
         }
+        if (ch->classId == ClassId::Area) {
+            hasNonImage = true;
+            hasNonBarChart = true;
+            hasNonHistChart = true;
+            areaNodes.push_back(cid);
+            continue;
+        }
         hasNonBarChart = true;
+        if (ch->classId != ClassId::Histogram)
+            hasNonHistChart = true;
 
         if (ch->classId == ClassId::Group) {
             for (NodeId gcid : ch->children) {
@@ -337,8 +350,19 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         }
         if (ch->classId == ClassId::Histogram) {
             hasNonImage = true;
-            if (const Value *be = ch->props.get("BinEdges"))
-                scanNumericBounds(*be, xmin, xmax, anyX);
+            hasHistogram = true;
+            if (const Value *be = ch->props.get("BinEdges")) {
+                keel::f64 blo = 0.0, bhi = 0.0;
+                bool anyB = false;
+                scanNumericBounds(*be, blo, bhi, anyB);
+                if (anyB) {
+                    const keel::f64 pad = (bhi > blo) ? (bhi - blo) * 0.05 : 0.5;
+                    const keel::f64 px0 = blo - pad;
+                    const keel::f64 px1 = bhi + pad;
+                    if (!anyX) { xmin = px0; xmax = px1; anyX = true; }
+                    else { xmin = keel::min(xmin, px0); xmax = keel::max(xmax, px1); }
+                }
+            }
             if (const Value *vals = ch->props.get("Values")) {
                 scanNumericBounds(*vals, ymin, ymax, anyY);
                 hasBaseZero = true;
@@ -675,6 +699,51 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
         }
     }
 
+    // Process Area series (stacked cumulative sums anchored at BaseValue).
+    if (!areaNodes.empty()) {
+        keel::f64 bv = getProperty(areaNodes[0], "BaseValue", res).toScalar();
+        if (!keel::is_finite(bv)) bv = 0.0;
+        keel::usize maxN = 0;
+        for (NodeId aid : areaNodes) {
+            const GraphicsNode *an = findNode(aid);
+            if (!an) continue;
+            if (const Value *xd = an->props.get("XData")) {
+                scanNumericBounds(*xd, xmin, xmax, anyX);
+                if (xd->numel() > maxN) maxN = xd->numel();
+            }
+            if (const Value *yd = an->props.get("YData")) {
+                if (yd->numel() > maxN) maxN = yd->numel();
+            }
+        }
+        keel::Array<keel::f64> posSum(res), negSum(res);
+        posSum.resize(maxN, bv);
+        negSum.resize(maxN, bv);
+        keel::f64 aMin = bv, aMax = bv;
+        bool anyA = false;
+        for (NodeId aid : areaNodes) {
+            const GraphicsNode *an = findNode(aid);
+            if (!an) continue;
+            const Value *yd = an->props.get("YData");
+            if (!yd) continue;
+            for (keel::usize j = 0; j < yd->numel() && j < maxN; ++j) {
+                const keel::f64 yv = yd->elemAsDouble(j);
+                if (!keel::is_finite(yv)) continue;
+                anyA = true;
+                if (yv >= 0.0) {
+                    posSum[j] += yv;
+                    aMax = keel::max(aMax, posSum[j]);
+                } else {
+                    negSum[j] += yv;
+                    aMin = keel::min(aMin, negSum[j]);
+                }
+            }
+        }
+        if (anyA) {
+            if (!anyY) { ymin = aMin; ymax = aMax; anyY = true; }
+            else { ymin = keel::min(ymin, aMin); ymax = keel::max(ymax, aMax); }
+        }
+    }
+
     ax->boundsValid = true;
     ax->boundsScannedCount = ax->children.size();
     ax->boundsAnyX = anyX; ax->boundsXMin = xmin; ax->boundsXMax = xmax;
@@ -720,7 +789,8 @@ void GraphicsScene::recomputeAxesAutoLimits(NodeId axId, keel::Allocator *mr)
     };
 
     const bool imageOnlyTight = (hasImage && !hasNonImage);
-    applyAxis('x', "XLim", "XLimMode", (imageOnlyTight || barCatAxisX) ? nullptr : "XLimitMethod", "XScale", xmin, xmax, anyX);
+    const bool histOnlyX = (hasHistogram && !hasNonHistChart);
+    applyAxis('x', "XLim", "XLimMode", (imageOnlyTight || barCatAxisX || histOnlyX) ? nullptr : "XLimitMethod", "XScale", xmin, xmax, anyX);
     applyAxis('y', "YLim", "YLimMode", (imageOnlyTight || barCatAxisY) ? nullptr : "YLimitMethod", "YScale", ymin, ymax, anyY);
     if (anyZ) {
         applyAxis('z', "ZLim", "ZLimMode", "ZLimitMethod", "ZScale", zmin, zmax, true);
